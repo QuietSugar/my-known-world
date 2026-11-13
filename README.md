@@ -22,7 +22,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Open `http://127.0.0.1:8080`. A new installation seeds only a clearly synthetic demo graph by default so the UI is immediately usable. Set `MYKNOWNWORLD_SEED_DEMO=0` to disable this; the app then requires a valid existing snapshot. PostgreSQL is not published to the host; app and database run on an internal Compose network. Data persists in the `postgres-data` volume. `docker compose down` preserves it; `docker compose down -v` deletes it.
+Open `http://127.0.0.1:8080`. A new installation seeds only a clearly synthetic demo graph by default so the UI is immediately usable. Set `MYKNOWNWORLD_SEED_DEMO=0` to disable this; the app then requires a valid existing snapshot. PostgreSQL is not published to the host; app and database share a Compose-scoped bridge network. The app port binds to localhost by default. Data persists in the `postgres-data` volume. `docker compose down` preserves it; `docker compose down -v` deletes it.
 
 The app container runs as UID 10001 with a read-only root filesystem, dropped capabilities, no-new-privileges, a small `/tmp` tmpfs, and a health check. The web UI is served from the same image as the API.
 
