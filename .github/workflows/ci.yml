@@ -1,0 +1,138 @@
+name: Go CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: myknownworld_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d myknownworld_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_TEST_DSN: postgres://postgres:postgres@localhost:5432/myknownworld_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Format check
+        run: test -z "$(gofmt -l $(find . -name '*.go' -not -path './.git/*'))"
+      - name: Vet
+        run: go vet ./...
+      - name: Race-enabled tests
+        run: go test -race ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  container:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/quietsugar/my-known-world:ci
+          build-args: |
+            VERSION=0.01
+            VCS_REF=${{ github.sha }}
+      - name: Smoke test hardened Compose deployment
+        run: |
+          cp .env.example .env
+          sed -i 's/replace-with-a-long-random-password/ci-only-url-safe-password-1234567890/' .env
+          sed -i 's/IMAGE_TAG=v0.01/IMAGE_TAG=ci/' .env
+          docker compose up -d --no-build
+          trap 'docker compose down -v' EXIT
+          for attempt in $(seq 1 60); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q app)")" = healthy ]; then break; fi
+            sleep 2
+          done
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q app)")" = healthy
+          test "$(docker inspect -f '{{.Config.User}}' "$(docker compose ps -q app)")" = '10001:10001'
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$(docker compose ps -q app)")" = true
+          docker inspect -f '{{json .HostConfig.CapDrop}}' "$(docker compose ps -q app)" | grep -q 'ALL'
+          docker inspect -f '{{json .HostConfig.SecurityOpt}}' "$(docker compose ps -q app)" | grep -q 'no-new-privileges'
+          docker inspect -f '{{json .HostConfig.Tmpfs}}' "$(docker compose ps -q app)" | grep -q '/tmp'
+          python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080
+          curl --fail --silent http://127.0.0.1:8080/ | grep -q 'MyKnownWorld'
+      - name: Export image artifact
+        run: docker save ghcr.io/quietsugar/my-known-world:ci -o /tmp/my-known-world-image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: my-known-world-image-v0.01-${{ github.sha }}
+          path: /tmp/my-known-world-image.tar
+          retention-days: 7
+      - name: Login to GitHub Container Registry
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish release image to GHCR
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/quietsugar/my-known-world:${{ github.ref == 'refs/heads/master' && 'latest' || github.ref_name }}
+            ghcr.io/quietsugar/my-known-world:${{ github.sha }}
+          build-args: |
+            VERSION=0.01
+            VCS_REF=${{ github.sha }}
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/tags/v0.01'
+    needs: container
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: my-known-world-image-v0.01-${{ github.sha }}
+          path: release-assets
+      - name: Checksum container image
+        run: cd release-assets && sha256sum my-known-world-image.tar > my-known-world-image.tar.sha256
+      - name: Create tester release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.01
+          name: MyKnownWorld v0.01
+          body_path: docs/release-v0.01.md
+          files: |
+            release-assets/my-known-world-image.tar
+            release-assets/my-known-world-image.tar.sha256

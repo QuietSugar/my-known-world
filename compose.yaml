@@ -1,0 +1,59 @@
+name: my-known-world
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: myknownworld
+      POSTGRES_USER: myknownworld
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copy .env.example to .env and set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myknownworld -d myknownworld"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+    networks: [internal]
+
+  app:
+    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.01}
+    build:
+      context: .
+      args:
+        VERSION: ${IMAGE_VERSION:-0.01}
+    environment:
+      ADDR: :8080
+      WEB_ROOT: /app/web
+      DATABASE_URL: postgresql://myknownworld:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/myknownworld?sslmode=disable
+      MYKNOWNWORLD_SEED_DEMO: ${MYKNOWNWORLD_SEED_DEMO:-1}
+    ports:
+      - target: 8080
+        published: ${APP_PORT:-8080}
+        host_ip: ${APP_HOST_IP:-127.0.0.1}
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks: [internal]
+
+volumes:
+  postgres-data:
+
+networks:
+  internal:
+    internal: true
