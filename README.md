@@ -28,7 +28,7 @@ The app container runs as UID 10001 with a read-only root filesystem, dropped ca
 
 After startup, run the dependency-free read-only acceptance script with `python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080`. It checks health, the unique Self anchor, node paths, provenance fields, impact-path boundaries, and API consistency without changing data. GitHub Actions runs the same script against the container deployment.
 
-GitHub Actions builds and smoke-tests the container under the hardened Compose configuration. Each workflow run exports a versioned image tar artifact; pushes to `master` publish `ghcr.io/quietsugar/my-known-world:latest`, and version tag pushes publish the matching tag plus commit SHA. Pushing `v0.01` creates a GitHub tester release with the source archive, Docker image tar, checksum, and test notes in `docs/release-v0.01.md`.
+GitHub Actions builds and smoke-tests the container under the hardened Compose configuration. Each workflow run exports a versioned image tar artifact (90-day retention); pushes to `master` publish `ghcr.io/quietsugar/my-known-world:latest`, and version tag pushes publish the matching tag plus commit SHA. Pushing `v0.01` creates a GitHub tester release with the source archive, Docker image tar, checksum, and test notes in `docs/release-v0.01.md`. For a branch-run image tar, load it with `docker load -i my-known-world-image.tar`, set `IMAGE_TAG=ci` in `.env`, and run `docker compose up -d --no-build`.
 
 ## Local development
 

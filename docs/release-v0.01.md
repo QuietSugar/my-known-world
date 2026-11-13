@@ -32,6 +32,15 @@ For the API smoke, start `ADDR=:8081 go run ./cmd/myknownworld` in one terminal 
 
 ### Container
 
-Use the attached `my-known-world-image.tar` with `docker load -i my-known-world-image.tar`, or pull `ghcr.io/quietsugar/my-known-world:v0.01`. Then follow the Docker Compose steps in `README.md` and run the smoke test against `http://127.0.0.1:8080`.
+Download the CI artifact `my-known-world-image-v0.01-<commit>.zip` from the run's Artifacts section and extract `my-known-world-image.tar`. Load it and select its `ci` tag in Compose:
+
+```sh
+docker load -i my-known-world-image.tar
+# In .env, set IMAGE_TAG=ci, set a long POSTGRES_PASSWORD, then:
+docker compose up -d --no-build
+python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080
+```
+
+After the `v0.01` tag release is created, testers can instead pull `ghcr.io/quietsugar/my-known-world:v0.01`. Then follow the Docker Compose steps in `README.md`.
 
 The Compose default seeds only synthetic sample graph data. Do not add private information in this read-only test release.
