@@ -93,7 +93,15 @@ jobs:
           docker inspect -f '{{json .HostConfig.SecurityOpt}}' "$container_id" | grep -q 'no-new-privileges'
           docker inspect -f '{{json .HostConfig.Tmpfs}}' "$container_id" | grep -q '/tmp'
       - name: Test API contract
-        run: python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080
+        run: |
+          if python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080 > /tmp/api-smoke.log 2>&1; then
+            cat /tmp/api-smoke.log
+          else
+            cat /tmp/api-smoke.log
+            message="$(tail -n 1 /tmp/api-smoke.log | tr '%' ' ')"
+            echo "::error title=API smoke failure::$message"
+            exit 1
+          fi
       - name: Test bundled web UI
         run: curl --fail --silent http://127.0.0.1:8080/ | grep -q 'MyKnownWorld'
       - name: Tear down test stack
