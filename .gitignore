@@ -1,0 +1,20 @@
+# Go
+# Node / Vite
+node_modules/
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+
+# Local data and secrets
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.snapshot
+
+# Python
+__pycache__/
+*.py[cod]
