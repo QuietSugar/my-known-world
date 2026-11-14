@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuietSugar/my-known-world/internal/api"
 	"github.com/QuietSugar/my-known-world/internal/graph"
+	"github.com/QuietSugar/my-known-world/internal/mcpapi"
 	pgstore "github.com/QuietSugar/my-known-world/internal/store/postgres"
 	"github.com/QuietSugar/my-known-world/internal/webui"
 )
@@ -19,6 +20,7 @@ import (
 func main() {
 	g := demoGraph()
 	var syncPreviewer api.SyncPreviewer
+	var graphStore *pgstore.Store
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -27,6 +29,7 @@ func main() {
 			log.Fatal(err)
 		}
 		defer store.Close()
+		graphStore = store
 		syncPreviewer = store
 		if err = store.Migrate(ctx); err != nil {
 			log.Fatal(err)
@@ -46,7 +49,7 @@ func main() {
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
-		addr = ":8080"
+		addr = "127.0.0.1:8080"
 	}
 	mux := http.NewServeMux()
 	var repository api.Repository
@@ -56,6 +59,21 @@ func main() {
 	apiHandler := &api.Handler{Graph: g, SyncPreviewer: syncPreviewer, Repository: repository, WriteToken: os.Getenv("MYKNOWNWORLD_WRITE_TOKEN")}
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/healthz", apiHandler)
+	var mcpHistory mcpapi.HistoryReader
+	var mcpAssertions mcpapi.AssertionReader
+	if graphStore != nil {
+		mcpHistory, mcpAssertions = graphStore, graphStore
+	}
+	mcpHandler, err := mcpapi.NewHandler(func(ctx context.Context) (*graph.Graph, error) {
+		if graphStore != nil {
+			return graphStore.LoadSnapshot(ctx)
+		}
+		return g.Clone(), nil
+	}, mcpHistory, mcpAssertions)
+	if err != nil {
+		log.Fatalf("configure read-only MCP: %v", err)
+	}
+	mux.Handle("/mcp", mcpHandler)
 	if root := os.Getenv("WEB_ROOT"); root != "" {
 		mux.Handle("/", webui.Handler{Root: root})
 	} else {
