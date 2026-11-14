@@ -216,6 +216,9 @@ func (n Node) ValidateModelDetails() error {
 	if n.Machine != nil && n.Machine.MachineKind != "" && n.Machine.MachineKind != "physical" && n.Machine.MachineKind != "virtual" && n.Machine.MachineKind != "shared" {
 		return errors.New("machine kind must be physical, virtual, or shared")
 	}
+	if err := validateSafeRef(n.EvidenceReference); err != nil {
+		return err
+	}
 	refs := []string{}
 	if n.Hardware != nil {
 		refs = append(refs, n.Hardware.AccessReference, n.Hardware.MaintenanceReference)

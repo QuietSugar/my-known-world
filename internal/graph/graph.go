@@ -47,6 +47,7 @@ type Node struct {
 	VerificationAt     *time.Time                `json:"verificationAt,omitempty"`
 	VerificationResult string                    `json:"verificationResult,omitempty"`
 	EvidenceRef        string                    `json:"evidenceRef,omitempty"`
+	EvidenceReference  string                    `json:"evidenceReference,omitempty"`
 	Hardware           *HardwareDetails          `json:"hardware,omitempty"`
 	Machine            *MachineDetails           `json:"machine,omitempty"`
 	SoftwareProject    *SoftwareProjectDetails   `json:"softwareProject,omitempty"`
