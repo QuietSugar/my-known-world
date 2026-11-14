@@ -35,7 +35,7 @@ MyKnownWorld 是一个以个人为中心的认知图谱系统。
 - 我曾使用或已停止，但保留历史；
 - 我的认识来源、最近确认时间和信息确定性。
 
-`owns`、`maintains`、`knowsAbout` 必须保持独立。使用和受限操作若形成稳定需求，应使用明确关系或模型，不长期塞入备注。
+`owns`、`maintains`、`uses`、`canOperate`、`knowsAbout` 必须保持独立；`uses` 与 `canOperate` 已有明确关系，不能长期塞入备注。`canOperate` 表示受限操作能力，不表示当前可达或可成功执行。
 
 ### 3.2 物理硬件
 
@@ -144,7 +144,7 @@ Product 不应成为所有实例强制经过的冗余中间层。
 
 ### 3.9 网络与访问
 
-支持：
+支持显式 `Network` 对象与有方向的 `routesThrough`、`providesAccessTo` 关系，并支持：
 
 - 域名及其与机器、实例的映射；
 - IP、网段、NAT、端口；
@@ -232,6 +232,7 @@ Product 不应成为所有实例强制经过的冗余中间层。
 | Document | 稳定知识、规范或部署说明的引用 |
 | Runbook | 可重复执行且可验收的流程 |
 | WorkItem | 提案、设计、任务、冻结事项 |
+| Network | 网络、网段或 VPN 通道的明确对象 |
 | ProvisionalObject | 已知存在但尚未稳定分类的对象 |
 
 公共身份包含稳定 ID、明确类型、名称、来源、生命周期状态、最近确认时间和模型版本。公共身份表不承担万能业务字段。
@@ -245,6 +246,10 @@ Product 不应成为所有实例强制经过的冗余中间层。
 | owns | Self → 对象；我拥有或控制 |
 | maintains | Self → 对象；我承担维护责任 |
 | knowsAbout | Self → 任意节点；仅知道存在 |
+| uses | Self → 任意对象；我使用但不因此拥有或维护 |
+| canOperate | Self → Hardware/Machine/SoftwareInstance；我有明确受限操作能力（不是所有权或维护责任） |
+| routesThrough | Network → Network；网络流量经过明确网关/VPN 路径 |
+| providesAccessTo | Network → Machine/SoftwareInstance；该网络路径可用于访问目标 |
 | hosts | Hardware/Machine → Machine/SoftwareInstance；承载或部署 |
 | implementedFrom | SoftwareInstance → SoftwareProject；实例来自源码蓝图 |
 | hasRunningPeriod | SoftwareInstance → RunningPeriod；实际运行历史 |

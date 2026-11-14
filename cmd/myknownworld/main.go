@@ -18,6 +18,7 @@ import (
 
 func main() {
 	g := demoGraph()
+	var syncPreviewer api.SyncPreviewer
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -26,6 +27,7 @@ func main() {
 			log.Fatal(err)
 		}
 		defer store.Close()
+		syncPreviewer = store
 		if err = store.Migrate(ctx); err != nil {
 			log.Fatal(err)
 		}
@@ -47,7 +49,11 @@ func main() {
 		addr = ":8080"
 	}
 	mux := http.NewServeMux()
-	apiHandler := api.Handler{Graph: g}
+	var repository api.Repository
+	if configured, ok := syncPreviewer.(api.Repository); ok {
+		repository = configured
+	}
+	apiHandler := &api.Handler{Graph: g, SyncPreviewer: syncPreviewer, Repository: repository, WriteToken: os.Getenv("MYKNOWNWORLD_WRITE_TOKEN")}
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/healthz", apiHandler)
 	if root := os.Getenv("WEB_ROOT"); root != "" {

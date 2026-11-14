@@ -60,6 +60,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Read release version
+        run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
       - name: Build container image
         uses: docker/build-push-action@v6
         with:
@@ -67,13 +69,13 @@ jobs:
           load: true
           tags: ghcr.io/quietsugar/my-known-world:ci
           build-args: |
-            VERSION=0.01
+            VERSION=${{ env.VERSION }}
             VCS_REF=${{ github.sha }}
       - name: Prepare CI environment
         run: |
           cp .env.example .env
           sed -i 's/replace-with-a-long-random-password/ci-only-url-safe-password-1234567890/' .env
-          sed -i 's/IMAGE_TAG=v0.01/IMAGE_TAG=ci/' .env
+          sed -i 's/IMAGE_TAG=v0.0.2/IMAGE_TAG=ci/' .env
       - name: Start Compose stack
         run: docker compose up -d --no-build
       - name: Wait for healthy application
@@ -113,18 +115,18 @@ jobs:
         run: docker save ghcr.io/quietsugar/my-known-world:ci -o /tmp/my-known-world-image.tar
       - uses: actions/upload-artifact@v4
         with:
-          name: my-known-world-image-v0.01-${{ github.sha }}
+          name: my-known-world-image-${{ github.ref_name }}-${{ github.sha }}
           path: /tmp/my-known-world-image.tar
           retention-days: 90
       - name: Login to GitHub Container Registry
-        if: (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))) || (github.event_name == 'release' && github.event.action == 'published' && github.event.release.tag_name == 'v0.01')
+        if: (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))) || (github.event_name == 'release' && github.event.action == 'published' && startsWith(github.event.release.tag_name, 'v'))
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish release image to GHCR
-        if: (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))) || (github.event_name == 'release' && github.event.action == 'published' && github.event.release.tag_name == 'v0.01')
+        if: (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))) || (github.event_name == 'release' && github.event.action == 'published' && startsWith(github.event.release.tag_name, 'v'))
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -133,11 +135,11 @@ jobs:
             ghcr.io/quietsugar/my-known-world:${{ github.ref == 'refs/heads/master' && 'latest' || github.ref_name }}
             ghcr.io/quietsugar/my-known-world:${{ github.sha }}
           build-args: |
-            VERSION=0.01
+            VERSION=${{ env.VERSION }}
             VCS_REF=${{ github.sha }}
 
   release:
-    if: (github.event_name == 'push' && github.ref == 'refs/tags/v0.01') || (github.event_name == 'release' && github.event.action == 'published' && github.event.release.tag_name == 'v0.01')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: container
     runs-on: ubuntu-latest
     permissions:
@@ -146,16 +148,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: my-known-world-image-v0.01-${{ github.sha }}
+          name: my-known-world-image-${{ github.ref_name }}-${{ github.sha }}
           path: release-assets
       - name: Checksum container image
         run: cd release-assets && sha256sum my-known-world-image.tar > my-known-world-image.tar.sha256
       - name: Create tester release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.01
-          name: MyKnownWorld v0.01
-          body_path: docs/release-v0.01.md
+          tag_name: ${{ github.ref_name }}
+          name: MyKnownWorld ${{ github.ref_name }}
+          body_path: docs/release-${{ github.ref_name }}.md
           files: |
             release-assets/my-known-world-image.tar
             release-assets/my-known-world-image.tar.sha256

@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS hardware_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS machine_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS software_project_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS software_instance_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS account_credential_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS product_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS document_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS runbook_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);
+CREATE TABLE IF NOT EXISTS work_item_details (node_id text PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, details jsonb NOT NULL);

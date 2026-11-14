@@ -21,7 +21,7 @@ func (g *Graph) ImpactFromSelf() []ImpactPath {
 	if self == "" {
 		return nil
 	}
-	allowed := map[Predicate]bool{Owns: true, Maintains: true, Hosts: true, ImplementedFrom: true, HasRunningPeriod: true, HasCredential: true, DependsOn: true}
+	allowed := map[Predicate]bool{Owns: true, Maintains: true, Uses: true, Hosts: true, ImplementedFrom: true, HasRunningPeriod: true, HasCredential: true, DependsOn: true, RoutesThrough: true, ProvidesAccessTo: true}
 	paths := map[string][]Relation{self: {}}
 	queue := []string{self}
 	relations := g.Relations()

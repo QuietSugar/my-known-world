@@ -1,0 +1,595 @@
+{
+  "source": "synthetic-world-v1",
+  "parserVersion": "fixture-v1",
+  "nodes": [
+    {
+      "id": "self",
+      "type": "Self",
+      "name": "Self",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "modelVersion": 1
+    },
+    {
+      "id": "hw-lab",
+      "type": "Hardware",
+      "name": "Synthetic lab server",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "hardware": {
+        "category": "server",
+        "model": "Synthetic Model X",
+        "location": "Synthetic rack A",
+        "specifications": {
+          "cpu": "8 cores",
+          "memory": "32 GiB"
+        },
+        "status": "active",
+        "accessReference": "synthetic://access/hw-lab",
+        "maintenanceReference": "synthetic://maintenance/hw-lab"
+      }
+    },
+    {
+      "id": "machine-host",
+      "type": "Machine",
+      "name": "Synthetic hypervisor",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "hypervisor.example.invalid",
+        "os": "Synthetic Linux 1.0",
+        "ips": [
+          "192.0.2.10"
+        ],
+        "network": "documentation-net",
+        "status": "active",
+        "accessMethod": "synthetic://access/ssh/hypervisor",
+        "accessPrerequisites": [
+          "synthetic VPN profile"
+        ],
+        "allowedOperations": [
+          "read status",
+          "restart guest after approval"
+        ],
+        "forbiddenOperations": [
+          "modify real infrastructure"
+        ],
+        "responsibilityBoundary": "synthetic owner controls host; no production scope",
+        "resources": [
+          {
+            "kind": "port",
+            "name": "SSH",
+            "scope": "fixture only",
+            "port": 22
+          }
+        ],
+        "lastVerified": "2026-02-01T09:00:00Z"
+      }
+    },
+    {
+      "id": "machine-vm",
+      "type": "Machine",
+      "name": "Synthetic guest VM",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "guest.example.invalid",
+        "os": "Synthetic Debian 1.0",
+        "ips": [
+          "192.0.2.20"
+        ],
+        "network": "documentation-net",
+        "status": "active",
+        "accessMethod": "synthetic://access/ssh/guest",
+        "accessPrerequisites": [
+          "host machine available"
+        ],
+        "allowedOperations": [
+          "deploy fixture service"
+        ],
+        "forbiddenOperations": [
+          "store real credentials"
+        ],
+        "responsibilityBoundary": "test workload only",
+        "resources": [
+          {
+            "kind": "directory",
+            "name": "/srv/synthetic-app",
+            "scope": "fixture only"
+          },
+          {
+            "kind": "port",
+            "name": "HTTPS",
+            "port": 443
+          }
+        ],
+        "lastVerified": "2026-02-01T09:10:00Z"
+      }
+    },
+    {
+      "id": "project-app",
+      "type": "SoftwareProject",
+      "name": "Synthetic web project",
+      "lifecycle": "maintained",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareProject": {
+        "purpose": "exercise the synthetic deployment model",
+        "languages": [
+          "Go",
+          "TypeScript"
+        ],
+        "form": "source-and-deployed-service",
+        "remoteRepository": "https://example.invalid/synthetic-app.git",
+        "upstream": "https://example.invalid/upstream/synthetic-app",
+        "maintenanceState": "maintained",
+        "recommendedVersion": "1.4.2"
+      }
+    },
+    {
+      "id": "instance-app",
+      "type": "SoftwareInstance",
+      "name": "Synthetic web service",
+      "lifecycle": "deployed",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "Synthetic Suite",
+        "deploymentPath": "/srv/synthetic-app",
+        "deploymentMethod": "container",
+        "runtimeIdentity": "synthetic-user",
+        "endpoints": [
+          {
+            "kind": "https",
+            "address": "https://service.example.invalid",
+            "port": 443
+          }
+        ],
+        "configurationReferences": [
+          "synthetic://config/app",
+          "synthetic://deploy/compose"
+        ],
+        "deploymentState": "deployed",
+        "operationalState": "historically-running",
+        "maintenanceState": "maintained",
+        "verificationResult": "passed-synthetic-check",
+        "verifiedAt": "2026-02-01T12:05:00Z"
+      }
+    },
+    {
+      "id": "period-2026",
+      "type": "RunningPeriod",
+      "name": "Synthetic service run, 2026",
+      "lifecycle": "historical",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "startedAt": "2026-02-01T10:00:00Z",
+      "endedAt": "2026-02-01T12:00:00Z",
+      "deployedVersion": "1.4.2",
+      "verificationAt": "2026-02-01T12:05:00Z",
+      "verificationResult": "stopped-after-migration",
+      "evidenceRef": "synthetic-evidence://run/42"
+    },
+    {
+      "id": "credential-meta",
+      "type": "AccountCredential",
+      "name": "Synthetic service account metadata",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "unknown",
+      "modelVersion": 1,
+      "accountCredential": {
+        "account": "synthetic-service-user",
+        "credentialType": "service-account",
+        "purpose": "fixture-only service execution",
+        "scope": "synthetic deployment",
+        "accessReference": "synthetic://credential-vault/entry-1",
+        "rotationAt": "2026-01-01T00:00:00Z",
+        "status": "unknown",
+        "lastVerified": "2026-02-01T12:00:00Z"
+      }
+    },
+    {
+      "id": "product-suite",
+      "type": "Product",
+      "name": "Synthetic product family",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "product": {
+        "purpose": "group related synthetic instances",
+        "commonConfigurationReference": "synthetic://product/config",
+        "runbookReference": "synthetic://product/runbook"
+      }
+    },
+    {
+      "id": "document-runbook",
+      "type": "Document",
+      "name": "Synthetic deployment notes reference",
+      "lifecycle": "current",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "document": {
+        "role": "deployment-notes",
+        "authoritativeReference": "synthetic://docs/deployment-notes",
+        "effective": true,
+        "lastVerified": "2026-02-01T09:00:00Z"
+      }
+    },
+    {
+      "id": "runbook-deploy",
+      "type": "Runbook",
+      "name": "Synthetic deploy procedure reference",
+      "lifecycle": "current",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "runbook": {
+        "trigger": "test deployment request",
+        "preconditions": [
+          "isolated test database",
+          "explicit reviewer approval"
+        ],
+        "stepsReference": "synthetic://runbook/deploy/steps",
+        "stopConditionReference": "synthetic://runbook/deploy/stop",
+        "rollbackReference": "synthetic://runbook/deploy/rollback",
+        "verificationMethod": "API smoke test",
+        "lastVerified": "2026-02-01T12:05:00Z",
+        "executableStatus": "reference-only",
+        "approvalRequired": true
+      }
+    },
+    {
+      "id": "work-replacement",
+      "type": "WorkItem",
+      "name": "Synthetic host replacement",
+      "lifecycle": "planned",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "provisional",
+      "modelVersion": 1,
+      "workItem": {
+        "kind": "maintenance-proposal",
+        "status": "planned",
+        "rationaleReference": "synthetic://work/replacement/rationale",
+        "decisionEvidenceReference": "synthetic://work/replacement/evidence"
+      }
+    },
+    {
+      "id": "work-replacement-old",
+      "type": "WorkItem",
+      "name": "Synthetic previous replacement plan",
+      "lifecycle": "superseded",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "workItem": {
+        "kind": "maintenance-proposal",
+        "status": "superseded",
+        "rationaleReference": "synthetic://work/previous/rationale"
+      }
+    },
+    {
+      "id": "unclassified",
+      "type": "ProvisionalObject",
+      "name": "Synthetic unclassified service record",
+      "source": "synthetic test fixture",
+      "evidenceKind": "imported",
+      "certainty": "provisional",
+      "modelVersion": 1,
+      "candidateType": "SoftwareInstance",
+      "reviewStatus": "pending",
+      "reviewQuestions": [
+        "Which machine hosts this instance?",
+        "Is the service currently running?"
+      ]
+    },
+    {
+      "id": "unrelated-known",
+      "type": "SoftwareProject",
+      "name": "Synthetic known-only project",
+      "lifecycle": "unknown",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "unknown",
+      "modelVersion": 1
+    },
+    {
+      "id": "network-home",
+      "type": "Network",
+      "name": "Synthetic home subnet",
+      "modelVersion": 1,
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "network": {
+        "kind": "subnet",
+        "cidrs": [
+          "192.0.2.0/24"
+        ],
+        "gatewayReference": "router:synthetic-gateway",
+        "accessLocations": [
+          "synthetic-home"
+        ],
+        "status": "documented"
+      }
+    },
+    {
+      "id": "network-vpn",
+      "type": "Network",
+      "name": "Synthetic VPN route",
+      "modelVersion": 1,
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "network": {
+        "kind": "vpn",
+        "vpnReference": "vpn-profile:synthetic",
+        "accessLocations": [
+          "synthetic-away"
+        ],
+        "status": "configured"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "id": "owns-hardware",
+      "from": "self",
+      "predicate": "owns",
+      "to": "hw-lab",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "maintains-host",
+      "from": "self",
+      "predicate": "maintains",
+      "to": "machine-host",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "knows-project",
+      "from": "self",
+      "predicate": "knowsAbout",
+      "to": "unrelated-known",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "unknown"
+    },
+    {
+      "id": "knows-product",
+      "from": "self",
+      "predicate": "knowsAbout",
+      "to": "product-suite",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "hardware-hosts-machine",
+      "from": "hw-lab",
+      "predicate": "hosts",
+      "to": "machine-host",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "machine-hosts-machine",
+      "from": "machine-host",
+      "predicate": "hosts",
+      "to": "machine-vm",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "machine-hosts-instance",
+      "from": "machine-vm",
+      "predicate": "hosts",
+      "to": "instance-app",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "instance-from-project",
+      "from": "instance-app",
+      "predicate": "implementedFrom",
+      "to": "project-app",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "instance-running-period",
+      "from": "instance-app",
+      "predicate": "hasRunningPeriod",
+      "to": "period-2026",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "machine-has-credential",
+      "from": "machine-vm",
+      "predicate": "hasCredential",
+      "to": "credential-meta",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "unknown"
+    },
+    {
+      "id": "project-documents-machine",
+      "from": "document-runbook",
+      "predicate": "documents",
+      "to": "machine-vm",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "runbook-applies-machine",
+      "from": "runbook-deploy",
+      "predicate": "appliesTo",
+      "to": "machine-vm",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "work-targets-machine",
+      "from": "work-replacement",
+      "predicate": "targets",
+      "to": "machine-host",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "provisional"
+    },
+    {
+      "id": "work-supersedes-work",
+      "from": "work-replacement",
+      "predicate": "supersedes",
+      "to": "work-replacement-old",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "instance-depends-host",
+      "from": "instance-app",
+      "predicate": "dependsOn",
+      "to": "machine-vm",
+      "source": "synthetic test fixture",
+      "evidenceKind": "derived",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "self-knows-provisional",
+      "from": "self",
+      "predicate": "knowsAbout",
+      "to": "unclassified",
+      "source": "synthetic test fixture",
+      "evidenceKind": "imported",
+      "certainty": "provisional"
+    },
+    {
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "id": "uses-service",
+      "from": "self",
+      "predicate": "uses",
+      "to": "instance-app"
+    },
+    {
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "id": "can-operate-host",
+      "from": "self",
+      "predicate": "canOperate",
+      "to": "machine-host"
+    },
+    {
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "id": "uses-network-home",
+      "from": "self",
+      "predicate": "uses",
+      "to": "network-home"
+    },
+    {
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "id": "network-access-host",
+      "from": "network-home",
+      "predicate": "providesAccessTo",
+      "to": "machine-host"
+    },
+    {
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed",
+      "id": "home-routes-vpn",
+      "from": "network-home",
+      "predicate": "routesThrough",
+      "to": "network-vpn"
+    }
+  ],
+  "assertions": [
+    {
+      "id": "assert-instance-name-v1",
+      "nodeId": "instance-app",
+      "fieldPath": "name",
+      "valueHash": "0f73e41fcf4ef414d895ba68ebe9282faf1d2ae5cfb4be536dabc5c60779cd3b",
+      "reference": "synthetic-evidence://catalog/instance-app",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed",
+      "assertedAt": "2026-02-01T09:00:00Z"
+    },
+    {
+      "id": "assert-machine-hostname-v1",
+      "nodeId": "machine-host",
+      "fieldPath": "machine.hostname",
+      "valueHash": "2a067fab49d4a0205c57254a047a24af566a30da667ed0bcd334066d8808f64d",
+      "reference": "synthetic-evidence://inventory/hypervisor",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "assertedAt": "2026-02-01T09:00:00Z"
+    },
+    {
+      "id": "assert-period-version-v1",
+      "nodeId": "period-2026",
+      "fieldPath": "deployedVersion",
+      "valueHash": "8ec5a17af8275faf8adc4a9ef9a201cd68d26fe6216e78450e871070a46bbd50",
+      "reference": "synthetic-evidence://run/42",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "assertedAt": "2026-02-01T12:05:00Z"
+    },
+    {
+      "id": "assert-period-result-v1",
+      "nodeId": "period-2026",
+      "fieldPath": "verificationResult",
+      "valueHash": "bd282993296148e023f0d1b6a09a2fc45aea7bbe7a6686d7459b52d22788b93a",
+      "reference": "synthetic-evidence://run/42",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "assertedAt": "2026-02-01T12:05:00Z"
+    }
+  ]
+}

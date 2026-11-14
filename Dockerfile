@@ -18,7 +18,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w" -o /out/myknownworld ./cmd/myknownworld
 
 FROM alpine:3.22 AS runtime
-ARG VERSION=0.01
+ARG VERSION=0.0.2
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="MyKnownWorld" \
       org.opencontainers.image.description="Personal cognitive graph web application and API" \
