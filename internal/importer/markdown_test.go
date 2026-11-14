@@ -14,6 +14,15 @@ func markdownConfig() MarkdownConfig {
 	return MarkdownConfig{Source: "wiki:private-test", TypeMappings: map[string]graph.NodeType{"hardware": graph.Hardware, "vm": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "service": graph.SoftwareInstance}, MachineKindMappings: map[string]string{"vm": "virtual", "shared": "shared"}}
 }
 
+func assertionPresent(assertions []graph.FieldAssertion, nodeID, fieldPath string) bool {
+	for _, assertion := range assertions {
+		if assertion.NodeID == nodeID && assertion.FieldPath == fieldPath {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMarkdownFrontmatterCreatesSafeRepeatableCompleteBatch(t *testing.T) {
 	root := filepath.Join("testdata", "wiki")
 	a, err := MarkdownFrontmatter(root, markdownConfig())
@@ -65,6 +74,9 @@ func TestMarkdownFrontmatterCreatesSafeRepeatableCompleteBatch(t *testing.T) {
 	}
 	if len(a.Batch.Assertions) == 0 {
 		t.Fatal("mapped safe fields should have field assertions")
+	}
+	if !assertionPresent(a.Batch.Assertions, "machine/example-vm.md", "lifecycle") {
+		t.Fatal("frontmatter status must create a lifecycle field assertion")
 	}
 	for _, as := range a.Batch.Assertions {
 		if as.EvidenceKind != graph.EvidenceDocument || as.Reference == "" {

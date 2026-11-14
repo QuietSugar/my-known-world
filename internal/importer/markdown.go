@@ -376,6 +376,7 @@ func mappedFields(n graph.Node, m map[string]any, kindField string) []markdownMa
 			add(field, v)
 		}
 	}
+	addString("status", "lifecycle")
 	if d := n.Machine; d != nil {
 		addString("hostname", "machine.hostname")
 		addString("os", "machine.os")
