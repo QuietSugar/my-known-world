@@ -203,6 +203,38 @@ func TestMarkdownReferenceResolutionAndRenameConfigAreExplicit(t *testing.T) {
 	}
 }
 
+func TestMarkdownFrontmatterHandlesCRLFAndExcludesOversizedFrontmatter(t *testing.T) {
+	root := t.TempDir()
+	crlf := "---\r\ntype: vm\r\nname: CRLF VM\r\n---\r\nBODY-MUST-NOT-BE-READ\r\n"
+	if err := os.WriteFile(filepath.Join(root, "crlf.md"), []byte(crlf), 0600); err != nil {
+		t.Fatal(err)
+	}
+	large := "---\n" + strings.Repeat("x", maxFrontmatterBytes+1) + "\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "large.md"), []byte(large), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 || report.Batch.Nodes[0].ID != "crlf.md" {
+		t.Fatalf("unexpected scanned nodes: %+v", report.Batch.Nodes)
+	}
+	serialized, _ := json.Marshal(report)
+	if strings.Contains(string(serialized), "BODY-MUST-NOT-BE-READ") {
+		t.Fatal("body was included in report")
+	}
+	foundLarge := false
+	for _, exclusion := range report.Exclusions {
+		if exclusion.SourcePath == "large.md" && strings.Contains(exclusion.Reason, "size limit") {
+			foundLarge = true
+		}
+	}
+	if !foundLarge {
+		t.Fatalf("oversized frontmatter should be a safe exclusion: %+v", report.Exclusions)
+	}
+}
+
 func TestMarkdownFrontmatterExcludesInvalidIPAddressWithoutEchoingValue(t *testing.T) {
 	root := t.TempDir()
 	raw := `---

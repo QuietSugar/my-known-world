@@ -75,6 +75,19 @@ func TestSlashIDsAndReviewEvidence(t *testing.T) {
 		t.Fatalf("review provenance not persisted: %+v", n)
 	}
 
+	if err := repo.g.Publish(graph.Node{ID: "reject/with/slash", Type: graph.ProvisionalObject, Name: "Reject", ModelVersion: 1}, graph.Relation{ID: "reject-slash-link", To: "reject/with/slash"}); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/provisionals/reject/with/slash/reject", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("slash reject failed: %d %s", w.Code, w.Body.String())
+	}
+	if rejected, ok := repo.g.Node("reject/with/slash"); !ok || rejected.ReviewStatus != "rejected" {
+		t.Fatalf("slash provisional ID not rejected: %+v", rejected)
+	}
 	if err := repo.g.Publish(graph.Node{ID: "delete/with/slash", Type: graph.Machine, Name: "Delete", ModelVersion: 1}, graph.Relation{ID: "delete-slash-link", To: "delete/with/slash"}); err != nil {
 		t.Fatal(err)
 	}

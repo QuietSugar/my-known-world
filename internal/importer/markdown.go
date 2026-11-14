@@ -23,6 +23,8 @@ import (
 const MarkdownParserVersion = "markdown-frontmatter-v1"
 const maxFrontmatterBytes = 1 << 20
 
+var errFrontmatterTooLarge = errors.New("frontmatter exceeds size limit")
+
 // MarkdownConfig is deployment-local source configuration. Keep real wiki paths,
 // type mappings and source identifiers outside public repositories.
 type MarkdownConfig struct {
@@ -129,6 +131,10 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 		rel = path.Clean(filepath.ToSlash(rel))
 		data, closed, closeLine, e := readFrontmatter(full)
 		if e != nil {
+			if errors.Is(e, errFrontmatterTooLarge) {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: rel, Reason: "YAML frontmatter exceeds size limit", Line: closeLine})
+				return nil
+			}
 			return fmt.Errorf("read frontmatter %s: %w", rel, e)
 		}
 		if !closed {
@@ -245,31 +251,34 @@ func readFrontmatter(file string) ([]byte, bool, int, error) {
 	}
 	defer f.Close()
 	s := bufio.NewScanner(f)
-	s.Buffer(make([]byte, 4096), maxFrontmatterBytes)
+	s.Buffer(make([]byte, 4096), maxFrontmatterBytes*2)
 	if !s.Scan() {
 		if s.Err() != nil {
 			return nil, false, 1, s.Err()
 		}
 		return nil, false, 1, nil
 	}
-	if strings.TrimPrefix(s.Text(), "\ufeff") != "---" {
+	if strings.TrimSuffix(strings.TrimPrefix(s.Text(), "\ufeff"), "\r") != "---" {
 		return nil, false, 1, nil
 	}
 	var b strings.Builder
 	line := 1
 	for s.Scan() {
 		line++
-		text := s.Text()
+		text := strings.TrimSuffix(s.Text(), "\r")
 		if text == "---" || text == "..." {
 			return []byte(b.String()), true, line, nil
 		}
 		b.WriteString(text)
 		b.WriteByte('\n')
 		if b.Len() > maxFrontmatterBytes {
-			return nil, false, line, errors.New("frontmatter exceeds size limit")
+			return nil, false, line, errFrontmatterTooLarge
 		}
 	}
 	if s.Err() != nil {
+		if errors.Is(s.Err(), bufio.ErrTooLong) {
+			return nil, false, line, errFrontmatterTooLarge
+		}
 		return nil, false, line, s.Err()
 	}
 	return nil, false, line, nil
