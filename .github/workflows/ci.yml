@@ -115,7 +115,7 @@ jobs:
         run: docker save ghcr.io/quietsugar/my-known-world:ci -o /tmp/my-known-world-image.tar
       - uses: actions/upload-artifact@v4
         with:
-          name: my-known-world-image-${{ github.ref_name }}-${{ github.sha }}
+          name: my-known-world-image-${{ github.run_id }}-${{ github.sha }}
           path: /tmp/my-known-world-image.tar
           retention-days: 90
       - name: Login to GitHub Container Registry
@@ -148,7 +148,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: my-known-world-image-${{ github.ref_name }}-${{ github.sha }}
+          name: my-known-world-image-${{ github.run_id }}-${{ github.sha }}
           path: release-assets
       - name: Checksum container image
         run: cd release-assets && sha256sum my-known-world-image.tar > my-known-world-image.tar.sha256
