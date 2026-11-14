@@ -18,16 +18,17 @@ services:
     networks: [backend]
 
   app:
-    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.01}
+    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.0.2}
     build:
       context: .
       args:
-        VERSION: ${IMAGE_VERSION:-0.01}
+        VERSION: ${IMAGE_VERSION:-0.0.2}
     environment:
       ADDR: :8080
       WEB_ROOT: /app/web
       DATABASE_URL: postgresql://myknownworld:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/myknownworld?sslmode=disable
       MYKNOWNWORLD_SEED_DEMO: ${MYKNOWNWORLD_SEED_DEMO:-1}
+      MYKNOWNWORLD_WRITE_TOKEN: ${MYKNOWNWORLD_WRITE_TOKEN:-}
     ports:
       - target: 8080
         published: ${APP_PORT:-8080}

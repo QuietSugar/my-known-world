@@ -37,6 +37,24 @@ func TestTypedRelationsAndFailedPublishAreAtomic(t *testing.T) {
 	}
 }
 
+func TestHostsSupportsNestedMachinesButKeepsDirectionTyped(t *testing.T) {
+	g := New()
+	for _, n := range []Node{{ID: "host", Type: Machine, Name: "Host", ModelVersion: 1}, {ID: "vm", Type: Machine, Name: "VM", ModelVersion: 1}, {ID: "service", Type: SoftwareInstance, Name: "Service", ModelVersion: 1}} {
+		if err := g.AddNode(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := g.AddRelation(Relation{ID: "nested", From: "host", Predicate: Hosts, To: "vm"}); err != nil {
+		t.Fatalf("machine hosting machine should be valid: %v", err)
+	}
+	if err := g.AddRelation(Relation{ID: "deployment", From: "vm", Predicate: Hosts, To: "service"}); err != nil {
+		t.Fatalf("machine hosting instance should be valid: %v", err)
+	}
+	if err := g.AddRelation(Relation{ID: "reverse", From: "service", Predicate: Hosts, To: "vm"}); err == nil {
+		t.Fatal("software instance hosting a machine should be rejected")
+	}
+}
+
 func TestPublishUsesActualSelfIdentity(t *testing.T) {
 	g := New()
 	_ = g.AddNode(Node{ID: "anchor", Type: Self, Name: "Me", ModelVersion: 1})

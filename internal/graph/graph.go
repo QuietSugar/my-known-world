@@ -22,21 +22,41 @@ const (
 	Document          NodeType = "Document"
 	Runbook           NodeType = "Runbook"
 	WorkItem          NodeType = "WorkItem"
+	Network           NodeType = "Network"
 	ProvisionalObject NodeType = "ProvisionalObject"
 )
 
-var nodeTypes = map[NodeType]bool{Self: true, Hardware: true, Machine: true, SoftwareProject: true, SoftwareInstance: true, RunningPeriod: true, AccountCredential: true, Product: true, Document: true, Runbook: true, WorkItem: true, ProvisionalObject: true}
+var nodeTypes = map[NodeType]bool{Self: true, Hardware: true, Machine: true, SoftwareProject: true, SoftwareInstance: true, RunningPeriod: true, AccountCredential: true, Product: true, Document: true, Runbook: true, WorkItem: true, Network: true, ProvisionalObject: true}
 
 type Node struct {
-	ID            string       `json:"id"`
-	Type          NodeType     `json:"type"`
-	Name          string       `json:"name"`
-	Lifecycle     string       `json:"lifecycle,omitempty"`
-	Source        string       `json:"source"`
-	EvidenceKind  EvidenceKind `json:"evidenceKind"`
-	Certainty     Certainty    `json:"certainty"`
-	LastConfirmed *time.Time   `json:"lastConfirmed,omitempty"`
-	ModelVersion  int          `json:"modelVersion"`
+	ID                 string                    `json:"id"`
+	Type               NodeType                  `json:"type"`
+	Name               string                    `json:"name"`
+	Lifecycle          string                    `json:"lifecycle,omitempty"`
+	Source             string                    `json:"source"`
+	EvidenceKind       EvidenceKind              `json:"evidenceKind"`
+	Certainty          Certainty                 `json:"certainty"`
+	LastConfirmed      *time.Time                `json:"lastConfirmed,omitempty"`
+	ModelVersion       int                       `json:"modelVersion"`
+	CandidateType      NodeType                  `json:"candidateType,omitempty"`
+	ReviewStatus       string                    `json:"reviewStatus,omitempty"`
+	ReviewQuestions    []string                  `json:"reviewQuestions,omitempty"`
+	StartedAt          *time.Time                `json:"startedAt,omitempty"`
+	EndedAt            *time.Time                `json:"endedAt,omitempty"`
+	DeployedVersion    string                    `json:"deployedVersion,omitempty"`
+	VerificationAt     *time.Time                `json:"verificationAt,omitempty"`
+	VerificationResult string                    `json:"verificationResult,omitempty"`
+	EvidenceRef        string                    `json:"evidenceRef,omitempty"`
+	Hardware           *HardwareDetails          `json:"hardware,omitempty"`
+	Machine            *MachineDetails           `json:"machine,omitempty"`
+	SoftwareProject    *SoftwareProjectDetails   `json:"softwareProject,omitempty"`
+	SoftwareInstance   *SoftwareInstanceDetails  `json:"softwareInstance,omitempty"`
+	AccountCredential  *AccountCredentialDetails `json:"accountCredential,omitempty"`
+	Product            *ProductDetails           `json:"product,omitempty"`
+	Document           *DocumentDetails          `json:"document,omitempty"`
+	Runbook            *RunbookDetails           `json:"runbook,omitempty"`
+	WorkItem           *WorkItemDetails          `json:"workItem,omitempty"`
+	Network            *NetworkDetails           `json:"network,omitempty"`
 }
 
 type Predicate string
@@ -45,6 +65,10 @@ const (
 	Owns             Predicate = "owns"
 	Maintains        Predicate = "maintains"
 	KnowsAbout       Predicate = "knowsAbout"
+	Uses             Predicate = "uses"
+	CanOperate       Predicate = "canOperate"
+	RoutesThrough    Predicate = "routesThrough"
+	ProvidesAccessTo Predicate = "providesAccessTo"
 	Hosts            Predicate = "hosts"
 	ImplementedFrom  Predicate = "implementedFrom"
 	HasRunningPeriod Predicate = "hasRunningPeriod"
@@ -68,11 +92,14 @@ type Relation struct {
 }
 
 type Graph struct {
-	nodes     map[string]Node
-	relations map[string]Relation
+	nodes      map[string]Node
+	relations  map[string]Relation
+	assertions map[string]FieldAssertion
 }
 
-func New() *Graph { return &Graph{nodes: map[string]Node{}, relations: map[string]Relation{}} }
+func New() *Graph {
+	return &Graph{nodes: map[string]Node{}, relations: map[string]Relation{}, assertions: map[string]FieldAssertion{}}
+}
 
 func (g *Graph) AddNode(n Node) error {
 	if n.ID == "" || n.Name == "" {
@@ -83,6 +110,35 @@ func (g *Graph) AddNode(n Node) error {
 	}
 	if n.ModelVersion < 1 {
 		return errors.New("modelVersion must be positive")
+	}
+	if n.Type == ProvisionalObject {
+		if n.CandidateType != "" && (!nodeTypes[n.CandidateType] || n.CandidateType == Self || n.CandidateType == ProvisionalObject) {
+			return fmt.Errorf("invalid provisional candidate type %q", n.CandidateType)
+		}
+		if n.ReviewStatus == "" {
+			n.ReviewStatus = "pending"
+		}
+		if n.ReviewStatus != "pending" && n.ReviewStatus != "rejected" {
+			return fmt.Errorf("invalid provisional review status %q", n.ReviewStatus)
+		}
+	} else if n.CandidateType != "" || n.ReviewStatus != "" || len(n.ReviewQuestions) != 0 {
+		return errors.New("review metadata is only valid for provisional objects")
+	}
+	if n.Type == RunningPeriod {
+		if n.StartedAt != nil && n.EndedAt != nil && n.EndedAt.Before(*n.StartedAt) {
+			return errors.New("running period end must not precede start")
+		}
+		if (n.VerificationAt == nil) != (n.VerificationResult == "") {
+			return errors.New("verification time and result must be supplied together")
+		}
+		if len(n.EvidenceRef) > 1024 {
+			return errors.New("running period evidence reference exceeds 1024 bytes")
+		}
+	} else if n.StartedAt != nil || n.EndedAt != nil || n.DeployedVersion != "" || n.VerificationAt != nil || n.VerificationResult != "" || n.EvidenceRef != "" {
+		return errors.New("running-period attributes are only valid for RunningPeriod nodes")
+	}
+	if err := n.ValidateModelDetails(); err != nil {
+		return err
 	}
 	var err error
 	n.Source, n.EvidenceKind, n.Certainty, err = normalizeEvidence(n.Source, n.EvidenceKind, n.Certainty)
@@ -140,10 +196,16 @@ func validEndpoints(p Predicate, a, b NodeType) bool {
 	switch p {
 	case Owns, Maintains:
 		return a == Self && b != Self
-	case KnowsAbout:
+	case KnowsAbout, Uses:
 		return a == Self && b != Self
+	case CanOperate:
+		return a == Self && (b == Hardware || b == Machine || b == SoftwareInstance)
+	case RoutesThrough:
+		return a == Network && b == Network
+	case ProvidesAccessTo:
+		return a == Network && (b == Machine || b == SoftwareInstance)
 	case Hosts:
-		return (a == Hardware && b == Machine) || ((a == Machine || a == SoftwareInstance) && b == SoftwareInstance)
+		return (a == Hardware && b == Machine) || (a == Machine && (b == Machine || b == SoftwareInstance)) || (a == SoftwareInstance && b == SoftwareInstance)
 	case ImplementedFrom:
 		return a == SoftwareInstance && b == SoftwareProject
 	case HasRunningPeriod:

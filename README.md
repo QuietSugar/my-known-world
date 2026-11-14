@@ -9,8 +9,10 @@ MyKnownWorld distinguishes software projects from deployed instances, credential
 - [Requirements](docs/requirements.md)
 - [Technology recommendations](docs/technology.md)
 - [Implementation plan](docs/implementation-plan.md)
+- [Incremental sync protocol](docs/incremental-sync.md)
+- [Synthetic test data and batch test](docs/test-data.md)
 
-The initial implementation includes a Go domain core with typed relationships, Self connectivity, provenance and certainty labels, impact-path analysis, PostgreSQL snapshot storage, and a read-only HTTP API with a React web UI. The first tester version is `0.01` (Git tag `v0.01`); it serves either synthetic sample data or an existing complete PostgreSQL snapshot.
+The first tester version (`v0.01`) was a read-only graph viewer. The current early-access target is `0.0.2` (Git tag `v0.0.2`): typed graph models, provenance and certainty, PostgreSQL persistence, authenticated review and sync writes, manual graph maintenance with preview-before-write, undo history, graph exploration, and a React UI. It serves synthetic sample data by default or an existing complete PostgreSQL snapshot.
 
 ## Docker deployment
 
@@ -22,13 +24,13 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Open `http://127.0.0.1:8080`. A new installation seeds only a clearly synthetic demo graph by default so the UI is immediately usable. Set `MYKNOWNWORLD_SEED_DEMO=0` to disable this; the app then requires a valid existing snapshot. PostgreSQL is not published to the host; app and database share a Compose-scoped bridge network. The app port binds to localhost by default. Data persists in the `postgres-data` volume. `docker compose down` preserves it; `docker compose down -v` deletes it.
+Open `http://127.0.0.1:8080`. To enable authenticated batch-apply and provisional-review actions, set a stable random `MYKNOWNWORLD_WRITE_TOKEN` of at least 32 bytes in `.env` (leave it empty to keep all writes disabled). Generate one locally with `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'`; do not publish it. The UI asks for the token when a protected write is submitted and stores it in the current browser session. A new installation seeds only a clearly synthetic demo graph by default so the UI is immediately usable. Set `MYKNOWNWORLD_SEED_DEMO=0` to disable this; the app then requires a valid existing snapshot. PostgreSQL is not published to the host; app and database share a Compose-scoped bridge network. The app port binds to localhost by default. Data persists in the `postgres-data` volume. `docker compose down` preserves it; `docker compose down -v` deletes it.
 
 The app container runs as UID 10001 with a read-only root filesystem, dropped capabilities, no-new-privileges, a small `/tmp` tmpfs, and a health check. The web UI is served from the same image as the API.
 
 After startup, run the dependency-free read-only acceptance script with `python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080`. It checks health, the unique Self anchor, node paths, provenance fields, impact-path boundaries, and API consistency without changing data. GitHub Actions runs the same script against the container deployment.
 
-GitHub Actions builds and smoke-tests the container under the hardened Compose configuration. Each workflow run exports a versioned image tar artifact (90-day retention); pushes to `master` publish `ghcr.io/quietsugar/my-known-world:latest`, and version tag pushes publish the matching tag plus commit SHA. Pushing `v0.01` creates a GitHub tester release with the source archive, Docker image tar, checksum, and test notes in `docs/release-v0.01.md`. For a branch-run image tar, load it with `docker load -i my-known-world-image.tar`, set `IMAGE_TAG=ci` in `.env`, and run `docker compose up -d --no-build`.
+GitHub Actions builds and smoke-tests the container under the hardened Compose configuration. Each workflow run exports a versioned image tar artifact (90-day retention); pushes to `master` publish `ghcr.io/quietsugar/my-known-world:latest`, and version tag pushes publish the matching tag plus commit SHA. Pushing a version tag such as `v0.0.2` creates a GitHub release with the source archive, Docker image tar, checksum, and matching `docs/release-<tag>.md` notes. For a CI image tar, load it with `docker load -i my-known-world-image.tar`, set `IMAGE_TAG=ci` in `.env`, and run `docker compose up -d --no-build`. The current release candidate is described in `docs/release-v0.0.2.md`; use the [release checklist](docs/release-checklist-v0.0.2.md) before tagging.
 
 ## Local development
 
