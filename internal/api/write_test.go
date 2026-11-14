@@ -33,6 +33,13 @@ func (m *memoryRepository) ReviewProvisional(_ context.Context, id string, targe
 	}
 	return err
 }
+func (m *memoryRepository) ReviewProvisionalWithEvidence(_ context.Context, id string, target graph.NodeType, evidence graph.ProvisionalReviewEvidence) error {
+	next, err := m.g.ReviewProvisionalWithEvidence(id, target, evidence)
+	if err == nil {
+		m.g = next
+	}
+	return err
+}
 func (m *memoryRepository) RejectProvisional(_ context.Context, id string) error {
 	next, err := m.g.RejectProvisional(id)
 	if err == nil {
@@ -46,6 +53,38 @@ func (m *memoryRepository) DeleteNode(_ context.Context, id string) error {
 		m.g = next
 	}
 	return err
+}
+
+func TestSlashIDsAndReviewEvidence(t *testing.T) {
+	g := fixture()
+	if err := g.Publish(graph.Node{ID: "pending/with/slash", Type: graph.ProvisionalObject, Name: "Pending", ModelVersion: 1, CandidateType: graph.Machine}, graph.Relation{ID: "pending-slash-link", To: "pending/with/slash"}); err != nil {
+		t.Fatal(err)
+	}
+	repo := &memoryRepository{g: g}
+	token := strings.Repeat("z", 32)
+	h := &Handler{Graph: g, Repository: repo, WriteToken: token}
+	req := httptest.NewRequest(http.MethodPost, "/api/provisionals/pending/with/slash/review", strings.NewReader(`{"targetType":"Machine","certainty":"confirmed","evidenceKind":"document","source":"manual-review","reference":"https://example.test/evidence"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("review failed: %d %s", w.Code, w.Body.String())
+	}
+	n, ok := repo.g.Node("pending/with/slash")
+	if !ok || n.Type != graph.Machine || n.Certainty != graph.CertaintyConfirmed || n.Source != "manual-review" || n.EvidenceReference != "https://example.test/evidence" {
+		t.Fatalf("review provenance not persisted: %+v", n)
+	}
+
+	if err := repo.g.Publish(graph.Node{ID: "delete/with/slash", Type: graph.Machine, Name: "Delete", ModelVersion: 1}, graph.Relation{ID: "delete-slash-link", To: "delete/with/slash"}); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/api/nodes/delete/with/slash", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("slash delete failed: %d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestWritesRequireConfiguredBearerTokenAndApplyBatch(t *testing.T) {

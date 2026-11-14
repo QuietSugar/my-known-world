@@ -81,8 +81,15 @@ setNodes(nodeResult.items); setRelations(relationResult.items); setImpacts(impac
       sessionStorage.setItem('mkw-write-token', token)
     }
     try {
-      if (action === 'classify') await api.reviewProvisional(node.id, reviewTarget, token)
-      else await api.rejectProvisional(node.id, token)
+      if (action === 'classify') {
+        const certainty = window.prompt('确定性：unknown / provisional / confirmed / disputed / stale', node.certainty || 'confirmed')
+        if (certainty === null) return
+        const source = window.prompt('证据来源（可留空以保留原来源）', '')
+        if (source === null) return
+        const reference = window.prompt('证据引用（可留空；仅填安全引用，不填秘密或正文）', '')
+        if (reference === null) return
+        await api.reviewProvisional(node.id, reviewTarget, token, { certainty: certainty as import('./api').Certainty, source: source.trim() || undefined, reference: reference.trim() || undefined })
+      } else await api.rejectProvisional(node.id, token)
       await refresh(); setSelected(null)
     } catch (cause) {
       sessionStorage.removeItem('mkw-write-token')

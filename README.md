@@ -11,6 +11,9 @@ MyKnownWorld distinguishes software projects from deployed instances, credential
 - [Implementation plan](docs/implementation-plan.md)
 - [Incremental sync protocol](docs/incremental-sync.md)
 - [Synthetic test data and batch test](docs/test-data.md)
+- [Markdown frontmatter adapter](docs/markdown-frontmatter.md)
+- [Read-only MCP interface](docs/read-only-mcp.md)
+- [Synthetic Markdown adapter configuration](docs/markdown-adapter-config.example.yaml)
 
 The first tester version (`v0.01`) was a read-only graph viewer. The current early-access target is `0.0.2` (Git tag `v0.0.2`): typed graph models, provenance and certainty, PostgreSQL persistence, authenticated review and sync writes, manual graph maintenance with preview-before-write, undo history, graph exploration, and a React UI. It serves synthetic sample data by default or an existing complete PostgreSQL snapshot.
 
@@ -34,7 +37,7 @@ GitHub Actions builds and smoke-tests the container under the hardened Compose c
 
 ## Local development
 
-Run the API with `go run ./cmd/myknownworld` (listens on `:8080`; override with `ADDR`). Endpoints: `GET /healthz`, `GET /api/nodes`, `GET /api/nodes/{id}`, `GET /api/path/{id}`, and `GET /api/impact`. Run the web UI with `cd web && npm ci && npm run dev`; its Vite proxy expects the API at `127.0.0.1:8081` by default, so start the API with `ADDR=:8081 go run ./cmd/myknownworld` (set `API_PROXY_TARGET` to use a different backend).
+Run the API with `go run ./cmd/myknownworld` (defaults to `127.0.0.1:8080`; override with `ADDR`). The read-only MCP Streamable HTTP endpoint is `/mcp`; for local stdio, use `DATABASE_URL='postgres://…' go run ./cmd/myknownworld-mcp` after the database has been initialized. MCP registers query tools only and never receives the write token. Run the web UI with `cd web && npm ci && npm run dev`; its Vite proxy expects the API at `127.0.0.1:8081` by default, so start the API with `ADDR=127.0.0.1:8081 go run ./cmd/myknownworld` (set `API_PROXY_TARGET` to use a different backend).
 
 Apply the schema to a PostgreSQL database with `DATABASE_URL='postgres://…' go run ./cmd/myknownworld-migrate`. Start the API with `DATABASE_URL='postgres://…' go run ./cmd/myknownworld`; it applies migrations and reads the complete stored snapshot. An empty database intentionally fails closed; set `MYKNOWNWORLD_SEED_DEMO=1` only to seed an intentionally synthetic database. The persistence package exposes atomic `SaveSnapshot` and validated `LoadSnapshot`. `SaveSnapshot` replaces the entire graph, so use it only with a complete authoritative snapshot. PostgreSQL integration tests run when `POSTGRES_TEST_DSN` is set. GitHub Actions runs formatting, vet, race tests, and PostgreSQL integration tests on a PostgreSQL 16 service.
 

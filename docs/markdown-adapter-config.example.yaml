@@ -1,0 +1,21 @@
+# Synthetic, public-safe example only. Real wiki source config must remain private.
+source: wiki:private
+# Explicit mappings only; unknown type values become provisional objects.
+typeMappings:
+  hardware: Hardware
+  rig: Machine
+  vm: Machine
+  shared: Machine
+  service: SoftwareInstance
+# After a deliberate rename, map the new source path to the existing graph ID.
+# identityMappings:
+#   - sourceId: machine/new-name.md
+#     nodeId: machine/old-name.md
+machineKindMappings:
+  rig: physical
+  vm: virtual
+  shared: shared
+# Optional additional key-name patterns; the adapter also excludes common
+# password/secret/token/credential/private-key/API-key fields by default.
+secretKeyPatterns:
+  - '(?i)session[_-]?cookie'

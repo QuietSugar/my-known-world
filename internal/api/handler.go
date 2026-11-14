@@ -53,6 +53,9 @@ type SourcePolicyWriter interface {
 type FieldResolutionWriter interface {
 	ResolveField(context.Context, graph.FieldResolution) (graph.FieldResolution, error)
 }
+type ProvisionalEvidenceReviewer interface {
+	ReviewProvisionalWithEvidence(context.Context, string, graph.NodeType, graph.ProvisionalReviewEvidence) error
+}
 type AssertionViewReader interface {
 	AssertionViews(context.Context, string) ([]graph.AssertionView, error)
 }
@@ -138,7 +141,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "/healthz" {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "writesEnabled": len(h.WriteToken) >= 32 && h.Repository != nil})
 		return
 	}
 	g, err := h.currentGraph(r.Context())
@@ -429,7 +432,7 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Repository == nil {
-		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "persistent graph repository is not configured")
+		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "persistent graph repository is not configured; set DATABASE_URL to a PostgreSQL connection string to enable persistent writes")
 		return
 	}
 	var batch graph.SourceBatch
@@ -567,7 +570,7 @@ func (h *Handler) updateNode(w http.ResponseWriter, r *http.Request, path string
 		return
 	}
 	id := strings.TrimPrefix(path, "/api/nodes/")
-	if id == "" || strings.Contains(id, "/") {
+	if id == "" {
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 		return
 	}
@@ -632,11 +635,11 @@ func (h *Handler) deleteNode(w http.ResponseWriter, r *http.Request, path string
 		return
 	}
 	if h.Repository == nil {
-		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "persistent graph repository is not configured")
+		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "persistent graph repository is not configured; set DATABASE_URL to a PostgreSQL connection string to enable persistent writes")
 		return
 	}
 	id := strings.TrimPrefix(path, "/api/nodes/")
-	if id == "" || strings.Contains(id, "/") {
+	if id == "" {
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 		return
 	}
@@ -652,35 +655,52 @@ func (h *Handler) review(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	if h.Repository == nil {
-		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "persistent graph repository is not configured")
+		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "persistent graph repository is not configured; set DATABASE_URL to a PostgreSQL connection string to enable persistent writes")
 		return
 	}
 	rest := strings.TrimPrefix(path, "/api/provisionals/")
-	parts := strings.Split(rest, "/")
-	if len(parts) != 2 || parts[0] == "" || (parts[1] != "review" && parts[1] != "reject") {
+	idx := strings.LastIndex(rest, "/")
+	if idx <= 0 {
 		writeError(w, http.StatusNotFound, "not_found", "route not found")
 		return
 	}
-	if parts[1] == "reject" {
-		if err := h.Repository.RejectProvisional(r.Context(), parts[0]); err != nil {
+	id, action := rest[:idx], rest[idx+1:]
+	if action != "review" && action != "reject" {
+		writeError(w, http.StatusNotFound, "not_found", "route not found")
+		return
+	}
+	if action == "reject" {
+		if err := h.Repository.RejectProvisional(r.Context(), id); err != nil {
 			writeError(w, http.StatusConflict, "review_rejected", err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "rejected", "id": parts[0]})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "rejected", "id": id})
 		return
 	}
 	var body struct {
-		TargetType graph.NodeType `json:"targetType"`
+		TargetType   graph.NodeType     `json:"targetType"`
+		Certainty    graph.Certainty    `json:"certainty,omitempty"`
+		EvidenceKind graph.EvidenceKind `json:"evidenceKind,omitempty"`
+		Source       string             `json:"source,omitempty"`
+		Reference    string             `json:"reference,omitempty"`
 	}
 	if err := decodeBody(w, r, 16<<10, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid review: %v", err))
 		return
 	}
-	if err := h.Repository.ReviewProvisional(r.Context(), parts[0], body.TargetType); err != nil {
+	var reviewErr error
+	if reviewer, ok := h.Repository.(ProvisionalEvidenceReviewer); ok {
+		reviewErr = reviewer.ReviewProvisionalWithEvidence(r.Context(), id, body.TargetType, graph.ProvisionalReviewEvidence{Certainty: body.Certainty, EvidenceKind: body.EvidenceKind, Source: body.Source, Reference: body.Reference})
+	} else if body.Certainty != "" || body.EvidenceKind != "" || body.Source != "" || body.Reference != "" {
+		reviewErr = fmt.Errorf("repository does not support review evidence")
+	} else {
+		reviewErr = h.Repository.ReviewProvisional(r.Context(), id, body.TargetType)
+	}
+	if err := reviewErr; err != nil {
 		writeError(w, http.StatusConflict, "review_rejected", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "classified", "id": parts[0], "type": string(body.TargetType)})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "classified", "id": id, "type": string(body.TargetType)})
 }
 
 func (h *Handler) authorized(w http.ResponseWriter, r *http.Request) bool {
