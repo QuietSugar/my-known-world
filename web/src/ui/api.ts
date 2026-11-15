@@ -21,7 +21,7 @@ export interface FieldAssertionView { id:string; nodeId:string; fieldPath:string
 export interface Impact { node: Node; relationPath: Relation[] }
 export interface FieldConflict { nodeId:string; fieldPath:string; assertionIds:string[]; sources:string[] }
 export interface SyncPreview { source: string; sourceHash: string; parserVersion?: string; addedNodes: string[]; updatedNodes: string[]; addedRelations: string[]; updatedRelations: string[]; missingNodes: string[]; missingRelations: string[]; conflicts: string[]; addedAssertions: string[]; updatedAssertions: string[]; missingAssertions: string[]; valueConflicts:FieldConflict[] }
-export interface ManualMutation { kind:'createNode'|'updateNode'|'addRelation'|'deleteRelation'|'deleteNode'; node?:Node; relation?:Relation; id?:string }
+export interface ManualMutation { kind:'createNode'|'updateNode'|'addRelation'|'updateRelation'|'deleteRelation'|'deleteNode'; node?:Node; relation?:Relation; id?:string }
 export interface MutationPlan { expectedRevision:string; planHash:string; delta:{addedNodes:string[];updatedNodes:string[];deletedNodes:string[];addedRelations:string[];updatedRelations:string[];deletedRelations:string[];addedAssertions:string[];deletedAssertions:string[]} }
 export interface MutationOperation { id:number; action:string; recordedAt:string; reversible:boolean }
 export interface SourcePolicy { source:string; priority:number; allowedNodeTypes:NodeType[]; allowedPredicates:string[]; allowedFieldPaths:string[] }

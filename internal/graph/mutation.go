@@ -68,6 +68,15 @@ func (g *Graph) ApplyManualMutation(m ManualMutation) (*Graph, error) {
 		if err != nil {
 			return nil, err
 		}
+	case "updateRelation":
+		if m.Relation == nil || m.ID == "" || m.Node != nil {
+			return nil, errors.New("updateRelation requires id and relation only")
+		}
+		var err error
+		candidate, err = candidate.UpdateRelation(m.ID, *m.Relation)
+		if err != nil {
+			return nil, err
+		}
 	case "deleteRelation":
 		if m.ID == "" || m.Node != nil || m.Relation != nil {
 			return nil, errors.New("deleteRelation requires id only")

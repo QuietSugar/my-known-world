@@ -42,6 +42,31 @@ func (g *Graph) UpdateNode(id string, updated Node) (*Graph, error) {
 	return candidate, nil
 }
 
+// UpdateRelation edits provenance metadata without changing relation identity,
+// endpoints, predicate, or source ownership.
+func (g *Graph) UpdateRelation(id string, updated Relation) (*Graph, error) {
+	old, ok := g.relations[id]
+	if !ok {
+		return nil, fmt.Errorf("relation %q not found", id)
+	}
+	if updated.ID != id {
+		return nil, errors.New("relation ID is immutable")
+	}
+	if updated.From != old.From || updated.To != old.To || updated.Predicate != old.Predicate {
+		return nil, errors.New("relation endpoints and predicate are immutable; replace through explicit delete/add")
+	}
+	updated.Source = old.Source
+	candidate := cloneGraph(g)
+	delete(candidate.relations, id)
+	if err := candidate.AddRelation(updated); err != nil {
+		return nil, err
+	}
+	if err := ensureConnected(candidate); err != nil {
+		return nil, err
+	}
+	return candidate, nil
+}
+
 func (g *Graph) AddRelationChecked(relation Relation) (*Graph, error) {
 	candidate := cloneGraph(g)
 	if err := candidate.AddRelation(relation); err != nil {
