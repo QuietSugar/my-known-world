@@ -15,7 +15,7 @@ MyKnownWorld distinguishes software projects from deployed instances, credential
 - [Read-only MCP interface](docs/read-only-mcp.md)
 - [Synthetic Markdown adapter configuration](docs/markdown-adapter-config.example.yaml)
 
-The first tester version (`v0.01`) was a read-only graph viewer. The current early-access target is `0.0.2` (Git tag `v0.0.2`): typed graph models, provenance and certainty, PostgreSQL persistence, authenticated review and sync writes, manual graph maintenance with preview-before-write, undo history, graph exploration, and a React UI. It serves synthetic sample data by default or an existing complete PostgreSQL snapshot.
+The first tester version (`v0.01`) was a read-only graph viewer. The current early-access release candidate is `0.0.3`: it builds on typed graph models, provenance and certainty, PostgreSQL persistence, authenticated review and sync writes, and adds richer typed-detail editing, Markdown/frontmatter import, read-only MCP query tools, and preview-protected relation evidence edits. It serves synthetic sample data by default or an existing complete PostgreSQL snapshot.
 
 ## Docker deployment
 
@@ -33,7 +33,7 @@ The app container runs as UID 10001 with a read-only root filesystem, dropped ca
 
 After startup, run the dependency-free read-only acceptance script with `python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080`. It checks health, the unique Self anchor, node paths, provenance fields, impact-path boundaries, and API consistency without changing data. GitHub Actions runs the same script against the container deployment.
 
-GitHub Actions builds and smoke-tests the container under the hardened Compose configuration. Each workflow run exports a versioned image tar artifact (90-day retention); pushes to `master` publish `ghcr.io/quietsugar/my-known-world:latest`, and version tag pushes publish the matching tag plus commit SHA. Pushing a version tag such as `v0.0.2` creates a GitHub release with the source archive, Docker image tar, checksum, and matching `docs/release-<tag>.md` notes. For a CI image tar, load it with `docker load -i my-known-world-image.tar`, set `IMAGE_TAG=ci` in `.env`, and run `docker compose up -d --no-build`. The current release candidate is described in `docs/release-v0.0.2.md`; use the [release checklist](docs/release-checklist-v0.0.2.md) before tagging.
+GitHub Actions builds and smoke-tests the container under the hardened Compose configuration. Each workflow run exports a versioned image tar artifact (90-day retention); pushes to `master` publish `ghcr.io/quietsugar/my-known-world:latest`, and version tag pushes publish the matching tag plus commit SHA. Pushing a version tag such as `v0.0.3` creates a GitHub release with the source archive, Docker image tar, checksum, and matching `docs/release-<tag>.md` notes. For a CI image tar, load it with `docker load -i my-known-world-image.tar`, set `IMAGE_TAG=ci` in `.env`, and run `docker compose up -d --no-build`. The current release candidate is described in `docs/release-v0.0.3.md`; use the [release checklist](docs/release-checklist-v0.0.3.md) before tagging.
 
 ## Local development
 
