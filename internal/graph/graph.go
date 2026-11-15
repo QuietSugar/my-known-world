@@ -206,7 +206,7 @@ func validEndpoints(p Predicate, a, b NodeType) bool {
 	case ProvidesAccessTo:
 		return a == Network && (b == Machine || b == SoftwareInstance)
 	case Hosts:
-		return (a == Hardware && b == Machine) || (a == Machine && (b == Machine || b == SoftwareInstance)) || (a == SoftwareInstance && b == SoftwareInstance)
+		return (a == Hardware && b == Machine) || (a == Machine && (b == Machine || b == SoftwareInstance))
 	case ImplementedFrom:
 		return a == SoftwareInstance && b == SoftwareProject
 	case HasRunningPeriod:

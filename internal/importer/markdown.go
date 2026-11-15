@@ -462,7 +462,7 @@ func safeReference(sourcePath, raw string, known map[string]bool) (string, bool)
 	return clean, true
 }
 func validHosts(a, b graph.NodeType) bool {
-	return (a == graph.Hardware && b == graph.Machine) || (a == graph.Machine && (b == graph.Machine || b == graph.SoftwareInstance)) || (a == graph.SoftwareInstance && b == graph.SoftwareInstance)
+	return (a == graph.Hardware && b == graph.Machine) || (a == graph.Machine && (b == graph.Machine || b == graph.SoftwareInstance))
 }
 func canonicalSourceID(id string, mappings []graph.IdentityMapping) string {
 	for _, mapping := range mappings {
