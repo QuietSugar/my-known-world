@@ -86,6 +86,7 @@ setNodes(nodeResult.items); setRelations(relationResult.items); setImpacts(impac
   const resolveFieldAssertion = async (assertion:FieldAssertionView) => {
     const rationaleReference=window.prompt(`为 ${assertion.fieldPath} 选择此断言。请输入安全的决策/依据引用（不要输入秘密或原始敏感值）：`)
     if(!rationaleReference?.trim())return
+    if(!window.confirm(`将为 ${assertion.fieldPath} 追加裁决，并选择断言 ${assertion.id}（来源：${assertion.source}，证据：${evidenceLabel[assertion.evidenceKind]}，确定性：${certaintyLabel[assertion.certainty]}）。原始断言不会修改。继续？`))return
     let token=sessionStorage.getItem('mkw-write-token');if(!token){token=window.prompt('请输入 MYKNOWNWORLD_WRITE_TOKEN（仅保存在当前浏览器会话）');if(!token)return;sessionStorage.setItem('mkw-write-token',token)}
     try{const resolution=await api.createFieldResolution({nodeId:assertion.nodeId,fieldPath:assertion.fieldPath,selectedAssertionIds:[assertion.id],rationaleReference},token);setFieldResolutions(old=>[resolution,...old.filter(item=>item.id!==resolution.id)]);setAssertions(old=>old.map(item=>item.fieldPath===assertion.fieldPath?{...item,resolved:true,selected:item.id===assertion.id,resolutionId:resolution.id}:item));setError('字段裁决已追加；原始断言仍完整保留。')}
     catch(cause){sessionStorage.removeItem('mkw-write-token');setError(cause instanceof Error?cause.message:'字段裁决失败')}
@@ -106,8 +107,12 @@ setNodes(nodeResult.items); setRelations(relationResult.items); setImpacts(impac
         if (source === null) return
         const reference = window.prompt('证据引用（可留空；仅填安全引用，不填秘密或正文）', '')
         if (reference === null) return
+        if (!window.confirm(`将保留 ID「${node.id}」与现有关联，并将待分类对象转换为「${labels[reviewTarget]}」。${source.trim()?`来源覆盖为 ${source.trim()}。`:''}${reference.trim()?`证据引用：${reference.trim()}。`:''}继续？`)) return
         await api.reviewProvisional(node.id, reviewTarget, token, { certainty: certainty as import('./api').Certainty, source: source.trim() || undefined, reference: reference.trim() || undefined })
-      } else await api.rejectProvisional(node.id, token)
+      } else {
+        if (!window.confirm(`将保留对象「${node.id}」及其来源，但标记为拒绝分类。不会删除节点或关联。继续？`)) return
+        await api.rejectProvisional(node.id, token)
+      }
       await refresh(); setSelected(null)
     } catch (cause) {
       sessionStorage.removeItem('mkw-write-token')
@@ -231,7 +236,7 @@ function SourcePolicyPanel(){
  const [items,setItems]=useState<SourcePolicy[]>([]);const [text,setText]=useState('{\n  "source": "inventory",\n  "priority": 50,\n  "allowedNodeTypes": ["Machine"],\n  "allowedPredicates": ["knowsAbout", "hosts"],\n  "allowedFieldPaths": ["machine.hostname", "machine.os", "machine.ips"]\n}');const [message,setMessage]=useState('');const [busy,setBusy]=useState(false)
  const refresh=()=>api.sourcePolicies().then(result=>setItems(result.items)).catch(cause=>setMessage(cause instanceof Error?cause.message:'来源策略不可用'))
  useEffect(()=>{void refresh()},[])
- const save=async()=>{let policy:SourcePolicy;try{policy=JSON.parse(text) as SourcePolicy}catch{setMessage('JSON 格式无效');return};const token=sessionStorage.getItem('mkw-write-token')||window.prompt('请输入 MYKNOWNWORLD_WRITE_TOKEN');if(!token)return;sessionStorage.setItem('mkw-write-token',token);setBusy(true);try{await api.saveSourcePolicy(policy,token);setMessage(`已保存来源策略：${policy.source}`);await refresh()}catch(cause){sessionStorage.removeItem('mkw-write-token');setMessage(cause instanceof Error?cause.message:'保存失败')}finally{setBusy(false)}}
+ const save=async()=>{let policy:SourcePolicy;try{policy=JSON.parse(text) as SourcePolicy}catch{setMessage('JSON 格式无效');return};if(!policy.source?.trim()){setMessage('来源标识必填');return};if(!window.confirm(`保存来源「${policy.source}」策略？优先级 ${policy.priority}；允许节点类型 ${(policy.allowedNodeTypes??[]).join('、')||'无'}；关系谓词 ${(policy.allowedPredicates??[]).join('、')||'无'}；字段 ${(policy.allowedFieldPaths??[]).join('、')||'无'}。策略不自动裁决事实。继续？`))return;const token=sessionStorage.getItem('mkw-write-token')||window.prompt('请输入 MYKNOWNWORLD_WRITE_TOKEN');if(!token)return;sessionStorage.setItem('mkw-write-token',token);setBusy(true);try{await api.saveSourcePolicy(policy,token);setMessage(`已保存来源策略：${policy.source}`);await refresh()}catch(cause){sessionStorage.removeItem('mkw-write-token');setMessage(cause instanceof Error?cause.message:'保存失败')}finally{setBusy(false)}}
  return <section className="panel sync-batch-panel"><div className="panel-head"><div><div className="panel-title">来源范围与优先级</div><div className="panel-sub">精确 allow-list；优先级仅作提示，不自动裁决事实。未配置的来源保持旧行为。</div></div></div><div className="sync-run-tags">{items.map(item=><button key={item.source} onClick={()=>setText(JSON.stringify(item,null,2))}>{item.source} · P{item.priority} · {item.allowedNodeTypes.length} 类对象</button>)}</div><textarea value={text} onChange={event=>setText(event.target.value)} spellCheck={false} aria-label="来源策略 JSON"/><div className="sync-batch-actions"><button onClick={()=>void save()} disabled={busy}>保存/更新策略</button><span>{busy?'保存中…':message}</span></div><small>策略适用于批次内全部节点类型、关系谓词及字段断言。被拒绝的批次不会部分写入。建议按来源职责配置最小范围。</small></section>
 }
 

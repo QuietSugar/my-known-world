@@ -1,8 +1,16 @@
 import { useMemo, useState } from 'react'
 import type { Node, NodeType } from './api'
 
-type FieldKind = 'text' | 'list' | 'json' | 'boolean'
-type FieldSpec = { key: string; label: string; kind?: FieldKind; hint?: string; shape?: 'object' | 'array' }
+type FieldKind = 'text' | 'list' | 'json' | 'boolean' | 'select'
+type FieldSpec = { key: string; label: string; kind?: FieldKind; hint?: string; shape?: 'object' | 'array'; options?: Array<{ value: string; label: string }> }
+
+const basicFields: FieldSpec[] = [
+  { key: 'lifecycle', label: '生命周期状态' },
+  { key: 'evidenceKind', label: '证据类型', kind: 'select', options: [{value:'unknown',label:'未知'},{value:'manual',label:'人工'},{value:'document',label:'文档'},{value:'observed',label:'观察'},{value:'derived',label:'派生'},{value:'imported',label:'导入'}] },
+  { key: 'certainty', label: '确定性', kind: 'select', options: [{value:'unknown',label:'未知'},{value:'provisional',label:'暂定'},{value:'confirmed',label:'已确认'},{value:'disputed',label:'有冲突'},{value:'stale',label:'已过期'}] },
+  { key: 'lastConfirmed', label: '最近确认时间', hint: 'RFC 3339 时间；留空表示未知' },
+  { key: 'evidenceReference', label: '证据引用', hint: '只填安全引用，不填秘密或正文' },
+]
 
 const detailConfig: Partial<Record<NodeType, { key: string | null; fields: FieldSpec[] }>> = {
   RunningPeriod: { key: null, fields: [
@@ -57,8 +65,9 @@ function inputValue(value: unknown, kind: FieldKind): string {
 
 export function DetailsEditor({ node, onClose, onSave }: { node: Node; onClose: () => void; onSave: (updated: Node) => Promise<void> }) {
   const config = detailConfig[node.type]
-  const original = useMemo(() => config ? (config.key ? ((node as unknown as Record<string, Record<string, unknown>>)[config.key] ?? {}) : node as unknown as Record<string, unknown>) : {}, [node, config])
+  const original = useMemo(() => config?.key ? ((node as unknown as Record<string, Record<string, unknown>>)[config.key] ?? {}) : {}, [node, config])
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries((config?.fields ?? []).map(field => [field.key, inputValue(original[field.key], field.kind ?? 'text')])))
+  const [basicValues, setBasicValues] = useState<Record<string, string>>(() => Object.fromEntries(basicFields.map(field => [field.key, inputValue((node as unknown as Record<string, unknown>)[field.key], field.kind ?? 'text')])))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   if (!config) return null
@@ -82,7 +91,15 @@ export function DetailsEditor({ node, onClose, onSave }: { node: Node; onClose: 
         } else if (raw.trim()) updatedDetails[field.key] = raw.trim()
         else delete updatedDetails[field.key]
       }
-      const updated = config.key ? { ...node, [config.key]: updatedDetails } as Node : { ...node, ...updatedDetails } as Node
+      const updatedBase = {
+        ...node,
+        lifecycle: basicValues.lifecycle?.trim() || undefined,
+        evidenceKind: (basicValues.evidenceKind || 'unknown') as Node['evidenceKind'],
+        certainty: (basicValues.certainty || 'unknown') as Node['certainty'],
+        lastConfirmed: basicValues.lastConfirmed?.trim() || undefined,
+        evidenceReference: basicValues.evidenceReference?.trim() || undefined,
+      }
+      const updated = config.key ? { ...updatedBase, [config.key]: updatedDetails } as Node : { ...updatedBase, ...updatedDetails } as Node
       setBusy(true); setError('')
       await onSave(updated)
     } catch (cause) {
@@ -90,7 +107,9 @@ export function DetailsEditor({ node, onClose, onSave }: { node: Node; onClose: 
     } finally { setBusy(false) }
   }
   return <div className="modal-scrim" role="presentation"><section className="panel create-node-dialog details-editor-dialog" role="dialog" aria-modal="true" aria-label={`${node.type} 类型详情编辑器`}>
-    <div className="panel-head"><div><div className="panel-title">编辑{node.type}详情</div><div className="panel-sub">只修改明确字段；列表每行一项，结构化字段使用 JSON。</div></div><button className="icon-button" onClick={onClose} aria-label="关闭">×</button></div>
+    <div className="panel-head"><div><div className="panel-title">编辑{node.type}详情</div><div className="panel-sub">来源标识不可在手动编辑中更改；列表每行一项，结构化字段使用 JSON。</div></div><button className="icon-button" onClick={onClose} aria-label="关闭">×</button></div>
+    <div className="details-source-lock"><span>来源标识（保持不变）</span><strong>{node.source || 'unspecified'}</strong></div>
+    <div className="details-editor-grid">{basicFields.map(field => <label className="details-editor-field" key={field.key}><span>{field.label}</span>{field.kind === 'select' ? <select value={basicValues[field.key] ?? ''} onChange={event => setBasicValues(old => ({ ...old, [field.key]: event.target.value }))}>{field.options?.map(option=><option value={option.value} key={option.value}>{option.label}</option>)}</select> : <input value={basicValues[field.key] ?? ''} onChange={event => setBasicValues(old => ({ ...old, [field.key]: event.target.value }))} placeholder={field.hint} />}</label>)}</div>
     <div className="details-editor-grid">{config.fields.map(field => <label className="details-editor-field" key={field.key}><span>{field.label}</span>{field.kind === 'boolean' ? <select value={values[field.key] ?? 'false'} onChange={event => setValues(old => ({ ...old, [field.key]: event.target.value }))}><option value="false">否</option><option value="true">是</option></select> : field.kind === 'list' || field.kind === 'json' ? <textarea value={values[field.key] ?? ''} onChange={event => setValues(old => ({ ...old, [field.key]: event.target.value }))} placeholder={field.kind === 'list' ? '每行一个值' : field.hint ?? '{}'} spellCheck={false} /> : <input value={values[field.key] ?? ''} onChange={event => setValues(old => ({ ...old, [field.key]: event.target.value }))} placeholder={field.hint} />}</label>)}</div>
     <small className="details-editor-warning">不要填写密码、令牌、私钥、文档正文或低熵敏感值；此界面仅保存元数据与安全引用。</small>
     {error && <p className="sync-conflict">{error}</p>}
