@@ -11,10 +11,12 @@ import (
 )
 
 type ManualMutation struct {
-	Kind     string    `json:"kind"`
-	Node     *Node     `json:"node,omitempty"`
-	Relation *Relation `json:"relation,omitempty"`
-	ID       string    `json:"id,omitempty"`
+	Kind           string                     `json:"kind"`
+	Node           *Node                      `json:"node,omitempty"`
+	Relation       *Relation                  `json:"relation,omitempty"`
+	ID             string                     `json:"id,omitempty"`
+	TargetType     NodeType                   `json:"targetType,omitempty"`
+	ReviewEvidence *ProvisionalReviewEvidence `json:"reviewEvidence,omitempty"`
 }
 type MutationDelta struct {
 	AddedNodes        []string `json:"addedNodes"`
@@ -92,6 +94,28 @@ func (g *Graph) ApplyManualMutation(m ManualMutation) (*Graph, error) {
 		}
 		var err error
 		candidate, err = candidate.DeleteNode(m.ID)
+		if err != nil {
+			return nil, err
+		}
+	case "reviewProvisional":
+		if m.ID == "" || m.Node != nil || m.Relation != nil || m.TargetType == "" {
+			return nil, errors.New("reviewProvisional requires id and targetType only")
+		}
+		evidence := ProvisionalReviewEvidence{}
+		if m.ReviewEvidence != nil {
+			evidence = *m.ReviewEvidence
+		}
+		var err error
+		candidate, err = candidate.ReviewProvisionalWithEvidence(m.ID, m.TargetType, evidence)
+		if err != nil {
+			return nil, err
+		}
+	case "rejectProvisional":
+		if m.ID == "" || m.Node != nil || m.Relation != nil || m.TargetType != "" || m.ReviewEvidence != nil {
+			return nil, errors.New("rejectProvisional requires id only")
+		}
+		var err error
+		candidate, err = candidate.RejectProvisional(m.ID)
 		if err != nil {
 			return nil, err
 		}

@@ -60,6 +60,8 @@ type FieldConflict struct {
 }
 
 type SyncPreview struct {
+	ExpectedRevision  string          `json:"expectedRevision,omitempty"`
+	PlanHash          string          `json:"planHash,omitempty"`
 	Source            string          `json:"source"`
 	SourceHash        string          `json:"sourceHash"`
 	ParserVersion     string          `json:"parserVersion,omitempty"`

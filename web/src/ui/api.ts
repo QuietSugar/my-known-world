@@ -20,8 +20,8 @@ export interface FieldAssertion { id: string; nodeId: string; fieldPath: string;
 export interface FieldAssertionView { id:string; nodeId:string; fieldPath:string; reference?:string; source:string; evidenceKind:EvidenceKind; certainty:Certainty; assertedAt:string; resolved:boolean; selected:boolean; resolutionId?:number }
 export interface Impact { node: Node; relationPath: Relation[] }
 export interface FieldConflict { nodeId:string; fieldPath:string; assertionIds:string[]; sources:string[] }
-export interface SyncPreview { source: string; sourceHash: string; parserVersion?: string; addedNodes: string[]; updatedNodes: string[]; addedRelations: string[]; updatedRelations: string[]; missingNodes: string[]; missingRelations: string[]; conflicts: string[]; addedAssertions: string[]; updatedAssertions: string[]; missingAssertions: string[]; valueConflicts:FieldConflict[] }
-export interface ManualMutation { kind:'createNode'|'updateNode'|'addRelation'|'updateRelation'|'deleteRelation'|'deleteNode'; node?:Node; relation?:Relation; id?:string }
+export interface SyncPreview { expectedRevision?:string; planHash?:string; source: string; sourceHash: string; parserVersion?: string; addedNodes: string[]; updatedNodes: string[]; addedRelations: string[]; updatedRelations: string[]; missingNodes: string[]; missingRelations: string[]; conflicts: string[]; addedAssertions: string[]; updatedAssertions: string[]; missingAssertions: string[]; valueConflicts:FieldConflict[] }
+export interface ManualMutation { kind:'createNode'|'updateNode'|'addRelation'|'updateRelation'|'deleteRelation'|'deleteNode'|'reviewProvisional'|'rejectProvisional'; node?:Node; relation?:Relation; id?:string; targetType?:NodeType; reviewEvidence?:{certainty?:Certainty;evidenceKind?:EvidenceKind;source?:string;reference?:string} }
 export interface MutationPlan { expectedRevision:string; planHash:string; delta:{addedNodes:string[];updatedNodes:string[];deletedNodes:string[];addedRelations:string[];updatedRelations:string[];deletedRelations:string[];addedAssertions:string[];deletedAssertions:string[]} }
 export interface MutationOperation { id:number; action:string; recordedAt:string; reversible:boolean }
 export interface SourcePolicy { source:string; priority:number; allowedNodeTypes:NodeType[]; allowedPredicates:string[]; allowedFieldPaths:string[] }
@@ -57,21 +57,18 @@ export const api = {
   previewMutation: (mutation:ManualMutation) => writeJSON<MutationPlan>('/api/operations/preview','',{mutation}),
   applyMutation: (mutation:ManualMutation,plan:MutationPlan,token:string) => writeJSON<{applied:boolean;plan:MutationPlan}>('/api/operations/apply',token,{mutation,expectedRevision:plan.expectedRevision,planHash:plan.planHash}),
   mutationOperations: () => readJSON<{ items:MutationOperation[] }>('/api/operations'),
-  undoOperation: (id:number,token:string) => writeJSON<{undone:number}>(`/api/operations/${id}/undo`,token,{}),
+  previewUndoOperation: (id:number) => writeJSON<MutationPlan>(`/api/operations/${id}/undo/preview`,'',{}),
+  undoOperation: (id:number,plan:MutationPlan,token:string) => writeJSON<{undone:number}>(`/api/operations/${id}/undo/apply`,token,{expectedRevision:plan.expectedRevision,planHash:plan.planHash}),
   sourcePolicies: () => readJSON<{ items: SourcePolicy[] }>('/api/sync/policies'),
-  saveSourcePolicy: (policy:SourcePolicy,token:string) => writeJSON<{saved:boolean;policy:SourcePolicy}>('/api/sync/policies',token,policy),
+  previewSourcePolicy: (policy:SourcePolicy) => writeJSON<{plan:MutationPlan;previousPolicy:SourcePolicy|null;policy:SourcePolicy}>('/api/sync/policies/preview','',{policy}),
+  saveSourcePolicy: (policy:SourcePolicy,plan:MutationPlan,token:string) => writeJSON<{saved:boolean;policy:SourcePolicy}>('/api/sync/policies/apply',token,{policy,expectedRevision:plan.expectedRevision,planHash:plan.planHash}),
   syncHistory: (source: string) => readJSON<{ items: SyncRun[] }>(`/api/sync/sources/${encodeURIComponent(source)}/history`),
   entityHistory: (kind:string,id:string) => readJSON<{ items:ChangeEvent[] }>(`/api/entities/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/history`),
   fieldResolutions: (id:string) => readJSON<{ items:FieldResolution[] }>(`/api/nodes/${encodeURIComponent(id)}/resolutions`),
-  createFieldResolution: (body:Omit<FieldResolution,'id'|'recordedAt'>,token:string) => writeJSON<FieldResolution>('/api/assertions/resolve',token,body),
-  createNode: (node:Node,relation:Relation,token:string) => writeJSON<{created:string}>('/api/nodes',token,{node,relation}),
-  updateNode: (id:string,node:Node,token:string) => writeJSON<{updated:string}>(`/api/nodes/${encodeURIComponent(id)}`,token,node,'PUT'),
-  addRelation: (relation:Relation,token:string) => writeJSON<{created:string}>('/api/relations',token,relation),
-  deleteRelation: (id:string,token:string) => writeJSON<{deleted:string}>(`/api/relations/${encodeURIComponent(id)}`,token,undefined,'DELETE'),
-  reviewProvisional: (id: string, targetType: NodeType, token: string, evidence: { certainty?: Certainty; evidenceKind?: EvidenceKind; source?: string; reference?: string } = {}) => writeJSON<{ status: string }>(`/api/provisionals/${encodeURIComponent(id)}/review`, token, { targetType, ...evidence }),
-  rejectProvisional: (id: string, token: string) => writeJSON<{ status: string }>(`/api/provisionals/${encodeURIComponent(id)}/reject`, token, {}),
+  previewFieldResolution: (resolution:Omit<FieldResolution,'id'|'recordedAt'>) => writeJSON<{plan:MutationPlan;resolution:Omit<FieldResolution,'id'|'recordedAt'>}>('/api/assertions/resolve/preview','',{resolution}),
+  createFieldResolution: (resolution:Omit<FieldResolution,'id'|'recordedAt'>,plan:MutationPlan,token:string) => writeJSON<FieldResolution>('/api/assertions/resolve/apply',token,{resolution,expectedRevision:plan.expectedRevision,planHash:plan.planHash}),
   previewBatch: (batch: unknown) => writeJSON<SyncPreview>('/api/sync/preview', '', batch),
-  applyBatch: (batch: unknown, token: string) => writeJSON<{ applied: boolean; preview: SyncPreview }>('/api/sync/apply', token, batch),
+  applyBatch: (batch: unknown, preview: SyncPreview, token: string) => writeJSON<{ applied: boolean; preview: SyncPreview }>('/api/sync/apply', token, { batch, expectedRevision: preview.expectedRevision, planHash: preview.planHash }),
   impact: () => readJSON<{ items: Impact[] }>('/api/impact'),
   path: (id: string) => readJSON<{ nodes: Node[]; relations: Relation[] }>(`/api/path/${encodeURIComponent(id)}`),
   explore: (id: string,direction:string,depth:number,predicates:string[]) => readJSON<Exploration>(`/api/explore/${encodeURIComponent(id)}?direction=${encodeURIComponent(direction)}&depth=${depth}&predicates=${encodeURIComponent(predicates.join(','))}`),

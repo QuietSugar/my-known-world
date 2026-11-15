@@ -16,4 +16,9 @@ func TestFieldResolutionValidation(t *testing.T) {
 	if err := base.Validate(); err == nil {
 		t.Fatal("unsafe rationale reference accepted")
 	}
+	base.RationaleReference = "ticket:42"
+	base.ID = 4
+	if err := base.Validate(); err == nil {
+		t.Fatal("client supplied server-assigned resolution ID accepted")
+	}
 }

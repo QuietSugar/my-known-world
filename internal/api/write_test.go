@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +16,9 @@ import (
 type memoryRepository struct{ g *graph.Graph }
 
 func (m *memoryRepository) PreviewSync(_ context.Context, b graph.SourceBatch) (graph.SyncPreview, error) {
-	return m.g.PreviewSync(b), nil
+	preview := m.g.PreviewSync(b)
+	preview.ExpectedRevision = "memory-revision"
+	return preview, nil
 }
 func (m *memoryRepository) LoadSnapshot(context.Context) (*graph.Graph, error) { return m.g, nil }
 func (m *memoryRepository) EntityHistory(_ context.Context, kind, id string, _ int) ([]graph.ChangeEvent, error) {
@@ -25,6 +30,12 @@ func (m *memoryRepository) ApplySync(_ context.Context, b graph.SourceBatch) (*g
 		m.g = next
 	}
 	return &p, err
+}
+func (m *memoryRepository) ApplySyncPlan(ctx context.Context, b graph.SourceBatch, revision string) (*graph.SyncPreview, error) {
+	if revision != "memory-revision" {
+		return nil, errors.New("stale revision")
+	}
+	return m.ApplySync(ctx, b)
 }
 func (m *memoryRepository) ReviewProvisional(_ context.Context, id string, target graph.NodeType) error {
 	next, err := m.g.ReviewProvisional(id, target)
@@ -55,7 +66,7 @@ func (m *memoryRepository) DeleteNode(_ context.Context, id string) error {
 	return err
 }
 
-func TestSlashIDsAndReviewEvidence(t *testing.T) {
+func TestLegacyReviewAndDeleteRoutesRequirePreview(t *testing.T) {
 	g := fixture()
 	if err := g.Publish(graph.Node{ID: "pending/with/slash", Type: graph.ProvisionalObject, Name: "Pending", ModelVersion: 1, CandidateType: graph.Machine}, graph.Relation{ID: "pending-slash-link", To: "pending/with/slash"}); err != nil {
 		t.Fatal(err)
@@ -63,40 +74,18 @@ func TestSlashIDsAndReviewEvidence(t *testing.T) {
 	repo := &memoryRepository{g: g}
 	token := strings.Repeat("z", 32)
 	h := &Handler{Graph: g, Repository: repo, WriteToken: token}
-	req := httptest.NewRequest(http.MethodPost, "/api/provisionals/pending/with/slash/review", strings.NewReader(`{"targetType":"Machine","certainty":"confirmed","evidenceKind":"document","source":"manual-review","reference":"https://example.test/evidence"}`))
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("review failed: %d %s", w.Code, w.Body.String())
+	for _, tc := range []struct{ method, path, body string }{{http.MethodPost, "/api/provisionals/pending/with/slash/review", `{"targetType":"Machine"}`}, {http.MethodPost, "/api/provisionals/pending/with/slash/reject", `{}`}, {http.MethodDelete, "/api/nodes/pending/with/slash", ""}} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusPreconditionRequired {
+			t.Errorf("%s %s: status %d %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
 	}
 	n, ok := repo.g.Node("pending/with/slash")
-	if !ok || n.Type != graph.Machine || n.Certainty != graph.CertaintyConfirmed || n.Source != "manual-review" || n.EvidenceReference != "https://example.test/evidence" {
-		t.Fatalf("review provenance not persisted: %+v", n)
-	}
-
-	if err := repo.g.Publish(graph.Node{ID: "reject/with/slash", Type: graph.ProvisionalObject, Name: "Reject", ModelVersion: 1}, graph.Relation{ID: "reject-slash-link", To: "reject/with/slash"}); err != nil {
-		t.Fatal(err)
-	}
-	req = httptest.NewRequest(http.MethodPost, "/api/provisionals/reject/with/slash/reject", strings.NewReader(`{}`))
-	req.Header.Set("Authorization", "Bearer "+token)
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("slash reject failed: %d %s", w.Code, w.Body.String())
-	}
-	if rejected, ok := repo.g.Node("reject/with/slash"); !ok || rejected.ReviewStatus != "rejected" {
-		t.Fatalf("slash provisional ID not rejected: %+v", rejected)
-	}
-	if err := repo.g.Publish(graph.Node{ID: "delete/with/slash", Type: graph.Machine, Name: "Delete", ModelVersion: 1}, graph.Relation{ID: "delete-slash-link", To: "delete/with/slash"}); err != nil {
-		t.Fatal(err)
-	}
-	req = httptest.NewRequest(http.MethodDelete, "/api/nodes/delete/with/slash", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("slash delete failed: %d %s", w.Code, w.Body.String())
+	if !ok || n.Type != graph.ProvisionalObject {
+		t.Fatalf("legacy endpoint mutated provisional: %+v", n)
 	}
 }
 
@@ -105,7 +94,9 @@ func TestWritesRequireConfiguredBearerTokenAndApplyBatch(t *testing.T) {
 	repo := &memoryRepository{g: g}
 	token := strings.Repeat("x", 32)
 	h := &Handler{Graph: g, Repository: repo, SyncPreviewer: repo, WriteToken: token}
-	body := `{"source":"test-import","nodes":[{"id":"batch-node","type":"Machine","name":"Batch node","modelVersion":1}],"relations":[]}`
+	batch := graph.SourceBatch{Source: "test-import", Nodes: []graph.Node{{ID: "batch-node", Type: graph.Machine, Name: "Batch node", ModelVersion: 1}}, Relations: []graph.Relation{}}
+	batchJSON, _ := json.Marshal(batch)
+	body := string(batchJSON)
 	req := httptest.NewRequest(http.MethodPost, "/api/sync/apply", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -113,6 +104,26 @@ func TestWritesRequireConfiguredBearerTokenAndApplyBatch(t *testing.T) {
 		t.Fatalf("missing bearer token status=%d body=%s", w.Code, w.Body.String())
 	}
 	req = httptest.NewRequest(http.MethodPost, "/api/sync/apply", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusPreconditionRequired {
+		t.Fatalf("legacy sync body must require preview plan: %d %s", w.Code, w.Body.String())
+	}
+	planHash, _ := guardedPlanMAC(token, "sync-batch", "memory-revision", batch)
+	applyBody, _ := json.Marshal(map[string]any{"batch": batch, "expectedRevision": "memory-revision", "planHash": planHash})
+	tamperedBatch := batch
+	tamperedBatch.Nodes = append([]graph.Node(nil), batch.Nodes...)
+	tamperedBatch.Nodes[0].Name = "Different content"
+	tamperedBody, _ := json.Marshal(map[string]any{"batch": tamperedBatch, "expectedRevision": "memory-revision", "planHash": planHash})
+	req = httptest.NewRequest(http.MethodPost, "/api/sync/apply", bytes.NewReader(tamperedBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict || len(repo.g.Nodes()) != 2 {
+		t.Fatalf("tampered sync plan accepted or mutated: %d %s", w.Code, w.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/sync/apply", bytes.NewReader(applyBody))
 	req.Header.Set("Authorization", "Bearer "+token)
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -124,7 +135,7 @@ func TestWritesRequireConfiguredBearerTokenAndApplyBatch(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedProvisionalReviewEndpoint(t *testing.T) {
+func TestAuthenticatedProvisionalReviewEndpointRequiresPreview(t *testing.T) {
 	g := fixture()
 	if err := g.Publish(graph.Node{ID: "pending", Type: graph.ProvisionalObject, Name: "Pending", ModelVersion: 1, CandidateType: graph.Machine}, graph.Relation{ID: "pending-link", To: "pending"}); err != nil {
 		t.Fatal(err)
@@ -136,11 +147,11 @@ func TestAuthenticatedProvisionalReviewEndpoint(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("review failed: %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusPreconditionRequired {
+		t.Fatalf("review route should require preview, got %d %s", w.Code, w.Body.String())
 	}
 	n, _ := repo.g.Node("pending")
-	if n.Type != graph.Machine {
-		t.Fatalf("node wasn't classified: %+v", n)
+	if n.Type != graph.ProvisionalObject {
+		t.Fatalf("legacy route changed type: %+v", n)
 	}
 }

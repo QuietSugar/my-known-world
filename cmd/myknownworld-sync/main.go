@@ -1,9 +1,11 @@
 // Command myknownworld-sync previews or atomically applies a JSON source batch.
-// Applying requires both -apply and an exact -confirm-source match as a safety gate.
+// Applying requires an exact source confirmation and the plan hash from a prior preview.
 package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -34,6 +36,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	input := flags.String("input", "", "JSON source batch file")
 	apply := flags.Bool("apply", false, "atomically apply the batch; without this flag only preview")
 	confirm := flags.String("confirm-source", "", "must exactly match batch source when -apply is used")
+	confirmPlan := flags.String("confirm-plan-hash", "", "must exactly match planHash printed by a prior preview")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -74,6 +77,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	if !*apply && *confirm != "" {
 		return errors.New("-confirm-source is only valid together with -apply")
 	}
+	if !*apply && *confirmPlan != "" {
+		return errors.New("-confirm-plan-hash is only valid together with -apply")
+	}
+	if *apply && *confirmPlan == "" {
+		return errors.New("applying requires -confirm-plan-hash from a prior preview")
+	}
 	dsn := getenv("DATABASE_URL")
 	if dsn == "" {
 		return errors.New("DATABASE_URL is required")
@@ -86,14 +95,21 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	if err = store.Migrate(ctx); err != nil {
 		return err
 	}
-	if !*apply {
-		preview, err := store.PreviewSync(ctx, batch)
-		if err != nil {
-			return err
-		}
-		return writeJSON(stdout, preview)
+	plan, err := store.PreviewSync(ctx, batch)
+	if err != nil {
+		return err
 	}
-	preview, err := store.ApplySync(ctx, batch)
+	plan.PlanHash, err = syncPlanConfirmation(plan.ExpectedRevision, batch)
+	if err != nil {
+		return err
+	}
+	if !*apply {
+		return writeJSON(stdout, plan)
+	}
+	if *confirmPlan != plan.PlanHash {
+		return fmt.Errorf("batch or graph changed since preview; expected -confirm-plan-hash %s", plan.PlanHash)
+	}
+	preview, err := store.ApplySyncPlan(ctx, batch, plan.ExpectedRevision)
 	if err != nil {
 		if preview != nil {
 			_ = writeJSON(stdout, preview)
@@ -101,6 +117,18 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		return err
 	}
 	return writeJSON(stdout, map[string]any{"applied": true, "preview": preview})
+}
+
+func syncPlanConfirmation(revision string, batch graph.SourceBatch) (string, error) {
+	data, err := json.Marshal(struct {
+		Revision string            `json:"revision"`
+		Batch    graph.SourceBatch `json:"batch"`
+	}{revision, batch})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func writeJSON(w io.Writer, value any) error {

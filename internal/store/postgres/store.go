@@ -28,6 +28,8 @@ type syncUndoMetadata struct {
 	Source           string                  `json:"source"`
 	PreviousState    *graph.SyncSourceState  `json:"previousState,omitempty"`
 	PreviousMappings []graph.IdentityMapping `json:"previousMappings"`
+	AppliedState     *graph.SyncSourceState  `json:"appliedState,omitempty"`
+	AppliedMappings  []graph.IdentityMapping `json:"appliedMappings,omitempty"`
 }
 
 func Open(ctx context.Context, dsn string) (*Store, error) {
@@ -355,18 +357,26 @@ func (s *Store) SourcePolicies(ctx context.Context) ([]graph.SourcePolicy, error
 	return out, rows.Err()
 }
 func (s *Store) SetSourcePolicy(ctx context.Context, p graph.SourcePolicy) error {
-	if err := p.Validate(); err != nil {
+	plan, _, err := s.PreviewSourcePolicy(ctx, p)
+	if err != nil {
 		return err
 	}
-	t, _ := json.Marshal(p.AllowedNodeTypes)
-	r, _ := json.Marshal(p.AllowedPredicates)
-	f, _ := json.Marshal(p.AllowedFieldPaths)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sync_source_policies(source,priority,allowed_node_types,allowed_predicates,allowed_field_paths) VALUES($1,$2,$3,$4,$5) ON CONFLICT(source) DO UPDATE SET priority=EXCLUDED.priority,allowed_node_types=EXCLUDED.allowed_node_types,allowed_predicates=EXCLUDED.allowed_predicates,allowed_field_paths=EXCLUDED.allowed_field_paths,updated_at=now()`, p.Source, p.Priority, t, r, f)
-	return err
+	return s.ApplySourcePolicy(ctx, p, plan.ExpectedRevision)
 }
 
 // ApplySync atomically reconciles a source batch with the persisted graph.
 func (s *Store) ApplySync(ctx context.Context, batch graph.SourceBatch) (*graph.SyncPreview, error) {
+	return s.applySync(ctx, batch, "")
+}
+
+func (s *Store) ApplySyncPlan(ctx context.Context, batch graph.SourceBatch, expectedRevision string) (*graph.SyncPreview, error) {
+	if expectedRevision == "" {
+		return nil, errors.New("expected revision is required")
+	}
+	return s.applySync(ctx, batch, expectedRevision)
+}
+
+func (s *Store) applySync(ctx context.Context, batch graph.SourceBatch, expectedRevision string) (*graph.SyncPreview, error) {
 	batch.Source = strings.TrimSpace(batch.Source)
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -397,6 +407,18 @@ func (s *Store) ApplySync(ctx context.Context, batch graph.SourceBatch) (*graph.
 		current = graph.New()
 	} else if err != nil {
 		return nil, err
+	}
+	if expectedRevision != "" {
+		if _, err = tx.ExecContext(ctx, `LOCK TABLE sync_sources, sync_identity_mappings, sync_source_policies IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+			return nil, err
+		}
+		revision, revErr := syncRevision(ctx, tx, current)
+		if revErr != nil {
+			return nil, revErr
+		}
+		if revision != expectedRevision {
+			return nil, errors.New("graph, source mappings, or policies changed since preview; preview again before applying")
+		}
 	}
 	policy, configured, policyErr := readSourcePolicy(ctx, tx, batch.Source)
 	if policyErr != nil {
@@ -430,6 +452,16 @@ func (s *Store) ApplySync(ctx context.Context, batch graph.SourceBatch) (*graph.
 	if _, err = tx.ExecContext(ctx, `INSERT INTO sync_sources(source,source_hash,parser_version,applied_at) VALUES($1,$2,$3,now()) ON CONFLICT(source) DO UPDATE SET source_hash=EXCLUDED.source_hash,parser_version=EXCLUDED.parser_version,applied_at=EXCLUDED.applied_at`, preview.Source, preview.SourceHash, preview.ParserVersion); err != nil {
 		return &preview, fmt.Errorf("record sync source state: %w", err)
 	}
+	var appliedState graph.SyncSourceState
+	if err = tx.QueryRowContext(ctx, `SELECT source,source_hash,parser_version,applied_at FROM sync_sources WHERE source=$1`, batch.Source).Scan(&appliedState.Source, &appliedState.SourceHash, &appliedState.ParserVersion, &appliedState.AppliedAt); err != nil {
+		return &preview, err
+	}
+	appliedMappings, err := loadIdentityMappings(ctx, tx, batch.Source)
+	if err != nil {
+		return &preview, err
+	}
+	syncUndo.AppliedState = &appliedState
+	syncUndo.AppliedMappings = appliedMappings
 	previewJSON, err := json.Marshal(preview)
 	if err != nil {
 		return &preview, err
@@ -504,6 +536,10 @@ func (s *Store) PreviewSync(ctx context.Context, batch graph.SourceBatch) (graph
 		return graph.SyncPreview{}, err
 	}
 	result := current.PreviewSync(batch)
+	result.ExpectedRevision, err = syncRevision(ctx, tx, current)
+	if err != nil {
+		return graph.SyncPreview{}, err
+	}
 	policy, configured, policyErr := readSourcePolicy(ctx, tx, batch.Source)
 	if policyErr != nil {
 		return graph.SyncPreview{}, policyErr
@@ -559,7 +595,7 @@ func (s *Store) SyncHistory(ctx context.Context, source string, limit int) ([]gr
 	return out, rows.Err()
 }
 
-func loadIdentityMappings(ctx context.Context, tx *sql.Tx, source string) ([]graph.IdentityMapping, error) {
+func loadIdentityMappings(ctx context.Context, tx queryer, source string) ([]graph.IdentityMapping, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT source_id,node_id FROM sync_identity_mappings WHERE source=$1 ORDER BY source_id`, source)
 	if err != nil {
 		return nil, err
@@ -846,7 +882,7 @@ func (s *Store) MutationOperations(ctx context.Context, limit int) ([]graph.Muta
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT o.operation_id,o.action,o.recorded_at,o.after_hash,(u.undo_id IS NOT NULL),(o.before_state <> '{}'::jsonb) FROM graph_mutation_operations o LEFT JOIN graph_operation_undos u ON u.operation_id=o.operation_id ORDER BY o.recorded_at DESC,o.operation_id DESC LIMIT $1`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT o.operation_id,o.action,o.recorded_at,o.after_hash,(u.undo_id IS NOT NULL),(o.before_state <> '{}'::jsonb),o.metadata FROM graph_mutation_operations o LEFT JOIN graph_operation_undos u ON u.operation_id=o.operation_id ORDER BY o.recorded_at DESC,o.operation_id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -855,17 +891,35 @@ func (s *Store) MutationOperations(ctx context.Context, limit int) ([]graph.Muta
 	for rows.Next() {
 		var item graph.MutationOperation
 		var afterHash string
+		var metadataJSON []byte
 		var undone, snapshotAvailable bool
-		if err = rows.Scan(&item.ID, &item.Action, &item.RecordedAt, &afterHash, &undone, &snapshotAvailable); err != nil {
+		if err = rows.Scan(&item.ID, &item.Action, &item.RecordedAt, &afterHash, &undone, &snapshotAvailable, &metadataJSON); err != nil {
 			return nil, err
 		}
 		item.Reversible = !undone && snapshotAvailable && afterHash == hash
+		if item.Reversible && strings.HasPrefix(item.Action, "sync:") {
+			var meta syncUndoMetadata
+			if err = json.Unmarshal(metadataJSON, &meta); err != nil || validateSyncUndoState(ctx, s.db, meta) != nil {
+				item.Reversible = false
+			}
+		}
 		out = append(out, item)
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) UndoOperation(ctx context.Context, id int64) error {
+	return s.undoOperation(ctx, id, "")
+}
+
+func (s *Store) UndoOperationPlanned(ctx context.Context, id int64, expectedRevision string) error {
+	if expectedRevision == "" {
+		return errors.New("expected revision is required")
+	}
+	return s.undoOperation(ctx, id, expectedRevision)
+}
+
+func (s *Store) undoOperation(ctx context.Context, id int64, expectedRevision string) error {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return err
@@ -905,6 +959,24 @@ func (s *Store) UndoOperation(ctx context.Context, id int64) error {
 	}
 	if currentHash != expected {
 		return errors.New("undo rejected: graph changed after this operation; only the latest unchanged operation can be undone")
+	}
+	if expectedRevision != "" {
+		revision, revErr := undoPlanRevision(id, currentHash, expected)
+		if revErr != nil {
+			return revErr
+		}
+		if revision != expectedRevision {
+			return errors.New("undo plan is stale; preview again before applying")
+		}
+	}
+	if strings.HasPrefix(action, "sync:") {
+		var meta syncUndoMetadata
+		if err = json.Unmarshal(metadataJSON, &meta); err != nil {
+			return err
+		}
+		if err = validateSyncUndoState(ctx, tx, meta); err != nil {
+			return err
+		}
 	}
 	var snapshot graph.Snapshot
 	if err = json.Unmarshal(beforeJSON, &snapshot); err != nil {
@@ -990,32 +1062,11 @@ func (s *Store) EntityHistory(ctx context.Context, kind, id string, limit int) (
 }
 
 func (s *Store) ResolveField(ctx context.Context, resolution graph.FieldResolution) (graph.FieldResolution, error) {
-	if err := resolution.Validate(); err != nil {
-		return resolution, err
-	}
-	ids, err := json.Marshal(resolution.SelectedAssertionIDs)
+	plan, err := s.PreviewFieldResolution(ctx, resolution)
 	if err != nil {
 		return resolution, err
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return resolution, err
-	}
-	defer tx.Rollback()
-	for _, id := range resolution.SelectedAssertionIDs {
-		var nodeID, field string
-		if err = tx.QueryRowContext(ctx, `SELECT node_id,field_path FROM field_assertions WHERE id=$1`, id).Scan(&nodeID, &field); err != nil {
-			return resolution, fmt.Errorf("selected assertion %q not found", id)
-		}
-		if nodeID != resolution.NodeID || field != resolution.FieldPath {
-			return resolution, fmt.Errorf("selected assertion %q belongs to another field", id)
-		}
-	}
-	err = tx.QueryRowContext(ctx, `INSERT INTO field_resolutions(node_id,field_path,selected_assertion_ids,rationale_reference) VALUES($1,$2,$3,$4) RETURNING resolution_id,recorded_at`, resolution.NodeID, resolution.FieldPath, ids, resolution.RationaleReference).Scan(&resolution.ID, &resolution.RecordedAt)
-	if err != nil {
-		return resolution, err
-	}
-	return resolution, tx.Commit()
+	return s.ApplyFieldResolution(ctx, resolution, plan.ExpectedRevision)
 }
 
 func (s *Store) AssertionViews(ctx context.Context, nodeID string) ([]graph.AssertionView, error) {

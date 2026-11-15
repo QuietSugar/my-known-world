@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/QuietSugar/my-known-world/internal/graph"
 )
 
 func TestApplyRequiresExactSourceConfirmation(t *testing.T) {
@@ -18,6 +20,28 @@ func TestApplyRequiresExactSourceConfirmation(t *testing.T) {
 	err := run(context.Background(), []string{"-input", path, "-apply"}, getenv, &out, &stderr)
 	if err == nil || !strings.Contains(err.Error(), `-confirm-source "safe-source"`) {
 		t.Fatalf("expected confirmation guard, got %v", err)
+	}
+}
+
+func TestApplyRequiresPlanHashAndPlanHashBindsPayloadAndRevision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "batch.json")
+	if err := os.WriteFile(path, []byte(`{"source":"safe-source","nodes":[],"relations":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	getenv := func(string) string { return "" }
+	var out, stderr strings.Builder
+	err := run(context.Background(), []string{"-input", path, "-apply", "-confirm-source", "safe-source"}, getenv, &out, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "-confirm-plan-hash") {
+		t.Fatalf("expected plan confirmation guard, got %v", err)
+	}
+	first, err := syncPlanConfirmation("revision-a", graph.SourceBatch{Source: "safe-source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := syncPlanConfirmation("revision-b", graph.SourceBatch{Source: "safe-source"})
+	third, _ := syncPlanConfirmation("revision-a", graph.SourceBatch{Source: "safe-source", ParserVersion: "changed"})
+	if first == second || first == third {
+		t.Fatal("confirmation hash must bind revision and batch payload")
 	}
 }
 
