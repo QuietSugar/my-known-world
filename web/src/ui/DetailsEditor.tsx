@@ -4,7 +4,12 @@ import type { Node, NodeType } from './api'
 type FieldKind = 'text' | 'list' | 'json' | 'boolean'
 type FieldSpec = { key: string; label: string; kind?: FieldKind; hint?: string; shape?: 'object' | 'array' }
 
-const detailConfig: Partial<Record<NodeType, { key: string; fields: FieldSpec[] }>> = {
+const detailConfig: Partial<Record<NodeType, { key: string | null; fields: FieldSpec[] }>> = {
+  RunningPeriod: { key: null, fields: [
+    { key: 'startedAt', label: '开始时间', hint: 'RFC 3339，例如 2026-11-15T09:00:00Z' }, { key: 'endedAt', label: '结束时间', hint: '未知或仍在运行可留空' },
+    { key: 'deployedVersion', label: '部署版本' }, { key: 'verificationAt', label: '验证时间', hint: 'RFC 3339' },
+    { key: 'verificationResult', label: '验证结果' }, { key: 'evidenceRef', label: '安全证据引用' },
+  ] },
   Hardware: { key: 'hardware', fields: [
     { key: 'category', label: '设备类别' }, { key: 'model', label: '型号' }, { key: 'location', label: '位置' }, { key: 'status', label: '状态' },
     { key: 'specifications', label: '规格（JSON 对象）', kind: 'json', shape: 'object' }, { key: 'accessReference', label: '访问说明引用' }, { key: 'maintenanceReference', label: '维护说明引用' },
@@ -52,7 +57,7 @@ function inputValue(value: unknown, kind: FieldKind): string {
 
 export function DetailsEditor({ node, onClose, onSave }: { node: Node; onClose: () => void; onSave: (updated: Node) => Promise<void> }) {
   const config = detailConfig[node.type]
-  const original = useMemo(() => config ? ((node as unknown as Record<string, Record<string, unknown>>)[config.key] ?? {}) : {}, [node, config])
+  const original = useMemo(() => config ? (config.key ? ((node as unknown as Record<string, Record<string, unknown>>)[config.key] ?? {}) : node as unknown as Record<string, unknown>) : {}, [node, config])
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries((config?.fields ?? []).map(field => [field.key, inputValue(original[field.key], field.kind ?? 'text')])))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -77,7 +82,7 @@ export function DetailsEditor({ node, onClose, onSave }: { node: Node; onClose: 
         } else if (raw.trim()) updatedDetails[field.key] = raw.trim()
         else delete updatedDetails[field.key]
       }
-      const updated = { ...node, [config.key]: updatedDetails } as Node
+      const updated = config.key ? { ...node, [config.key]: updatedDetails } as Node : { ...node, ...updatedDetails } as Node
       setBusy(true); setError('')
       await onSave(updated)
     } catch (cause) {
