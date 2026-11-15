@@ -39,7 +39,7 @@ func TestTypedRelationsAndFailedPublishAreAtomic(t *testing.T) {
 
 func TestHostsSupportsNestedMachinesButKeepsDirectionTyped(t *testing.T) {
 	g := New()
-	for _, n := range []Node{{ID: "host", Type: Machine, Name: "Host", ModelVersion: 1}, {ID: "vm", Type: Machine, Name: "VM", ModelVersion: 1}, {ID: "service", Type: SoftwareInstance, Name: "Service", ModelVersion: 1}} {
+	for _, n := range []Node{{ID: "host", Type: Machine, Name: "Host", ModelVersion: 1}, {ID: "vm", Type: Machine, Name: "VM", ModelVersion: 1}, {ID: "service", Type: SoftwareInstance, Name: "Service", ModelVersion: 1}, {ID: "service-2", Type: SoftwareInstance, Name: "Service 2", ModelVersion: 1}} {
 		if err := g.AddNode(n); err != nil {
 			t.Fatal(err)
 		}
@@ -52,6 +52,9 @@ func TestHostsSupportsNestedMachinesButKeepsDirectionTyped(t *testing.T) {
 	}
 	if err := g.AddRelation(Relation{ID: "reverse", From: "service", Predicate: Hosts, To: "vm"}); err == nil {
 		t.Fatal("software instance hosting a machine should be rejected")
+	}
+	if err := g.AddRelation(Relation{ID: "service-hosts-service", From: "service", Predicate: Hosts, To: "service-2"}); err == nil {
+		t.Fatal("hosts must not mean service dependency; use dependsOn for that")
 	}
 }
 

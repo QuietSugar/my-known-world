@@ -67,6 +67,27 @@ func TestSyncRenameMappingPreservesCanonicalIdentity(t *testing.T) {
 	}
 }
 
+func TestSyncPreviewDetectsEvidenceReferenceUpdate(t *testing.T) {
+	g := New()
+	_ = g.AddNode(Node{ID: "self", Type: Self, Name: "Self", ModelVersion: 1})
+	if err := g.Publish(Node{ID: "machine", Type: Machine, Name: "Machine", Source: "wiki", ModelVersion: 1, EvidenceReference: "wiki/old.md"}, Relation{ID: "machine-knows", To: "machine", Source: "wiki"}); err != nil {
+		t.Fatal(err)
+	}
+	batch := SourceBatch{Source: "wiki", Nodes: []Node{{ID: "machine", Type: Machine, Name: "Machine", ModelVersion: 1, EvidenceReference: "wiki/new.md"}}}
+	preview := g.PreviewSync(batch)
+	if len(preview.UpdatedNodes) != 1 || preview.UpdatedNodes[0] != "machine" {
+		t.Fatalf("evidence reference change must be reported as an update: %+v", preview)
+	}
+	updated, _, err := g.ApplySync(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _ := updated.Node("machine")
+	if n.EvidenceReference != "wiki/new.md" {
+		t.Fatalf("evidence reference was not applied: %+v", n)
+	}
+}
+
 func TestSyncPreviewReportsCrossSourceFieldConflictWithoutValuesOrHashes(t *testing.T) {
 	g := New()
 	_ = g.AddNode(Node{ID: "self", Type: Self, Name: "Self", ModelVersion: 1})
