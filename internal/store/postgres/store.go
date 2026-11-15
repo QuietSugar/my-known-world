@@ -578,7 +578,12 @@ func loadIdentityMappings(ctx context.Context, tx *sql.Tx, source string) ([]gra
 
 // ReviewProvisional atomically classifies a pending graph candidate.
 func (s *Store) ReviewProvisional(ctx context.Context, id string, target graph.NodeType) error {
-	return s.mutateGraph(ctx, "system:review", func(g *graph.Graph) (*graph.Graph, error) { return g.ReviewProvisional(id, target) })
+	return s.ReviewProvisionalWithEvidence(ctx, id, target, graph.ProvisionalReviewEvidence{})
+}
+func (s *Store) ReviewProvisionalWithEvidence(ctx context.Context, id string, target graph.NodeType, evidence graph.ProvisionalReviewEvidence) error {
+	return s.mutateGraph(ctx, "system:review", func(g *graph.Graph) (*graph.Graph, error) {
+		return g.ReviewProvisionalWithEvidence(id, target, evidence)
+	})
 }
 
 // DeleteNode explicitly removes one node without allowing orphaned graph fragments.

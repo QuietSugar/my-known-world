@@ -68,7 +68,7 @@ export const api = {
   updateNode: (id:string,node:Node,token:string) => writeJSON<{updated:string}>(`/api/nodes/${encodeURIComponent(id)}`,token,node,'PUT'),
   addRelation: (relation:Relation,token:string) => writeJSON<{created:string}>('/api/relations',token,relation),
   deleteRelation: (id:string,token:string) => writeJSON<{deleted:string}>(`/api/relations/${encodeURIComponent(id)}`,token,undefined,'DELETE'),
-  reviewProvisional: (id: string, targetType: NodeType, token: string) => writeJSON<{ status: string }>(`/api/provisionals/${encodeURIComponent(id)}/review`, token, { targetType }),
+  reviewProvisional: (id: string, targetType: NodeType, token: string, evidence: { certainty?: Certainty; evidenceKind?: EvidenceKind; source?: string; reference?: string } = {}) => writeJSON<{ status: string }>(`/api/provisionals/${encodeURIComponent(id)}/review`, token, { targetType, ...evidence }),
   rejectProvisional: (id: string, token: string) => writeJSON<{ status: string }>(`/api/provisionals/${encodeURIComponent(id)}/reject`, token, {}),
   previewBatch: (batch: unknown) => writeJSON<SyncPreview>('/api/sync/preview', '', batch),
   applyBatch: (batch: unknown, token: string) => writeJSON<{ applied: boolean; preview: SyncPreview }>('/api/sync/apply', token, batch),

@@ -3,6 +3,7 @@ package graph
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ProvisionalQueue returns pending classification candidates in stable ID order.
@@ -19,7 +20,20 @@ func (g *Graph) ProvisionalQueue() []Node {
 // ReviewProvisional classifies a pending candidate into an explicit stable type.
 // The source, evidence, certainty, ID, and existing relations are retained; the
 // operation is rejected if conversion would invalidate any relation endpoint.
+type ProvisionalReviewEvidence struct {
+	Certainty    Certainty    `json:"certainty,omitempty"`
+	EvidenceKind EvidenceKind `json:"evidenceKind,omitempty"`
+	Source       string       `json:"source,omitempty"`
+	Reference    string       `json:"reference,omitempty"`
+}
+
 func (g *Graph) ReviewProvisional(id string, target NodeType) (*Graph, error) {
+	return g.ReviewProvisionalWithEvidence(id, target, ProvisionalReviewEvidence{})
+}
+
+// ReviewProvisionalWithEvidence applies an optional human review provenance
+// decision while preserving the candidate ID, relations, and existing details.
+func (g *Graph) ReviewProvisionalWithEvidence(id string, target NodeType, evidence ProvisionalReviewEvidence) (*Graph, error) {
 	original, ok := g.Node(id)
 	if !ok || original.Type != ProvisionalObject {
 		return nil, errors.New("pending provisional object not found")
@@ -40,6 +54,29 @@ func (g *Graph) ReviewProvisional(id string, target NodeType) (*Graph, error) {
 			n.CandidateType = ""
 			n.ReviewStatus = ""
 			n.ReviewQuestions = nil
+			if evidence.Certainty != "" {
+				n.Certainty = evidence.Certainty
+			}
+			if evidence.EvidenceKind != "" {
+				n.EvidenceKind = evidence.EvidenceKind
+			}
+			if strings.TrimSpace(evidence.Source) != "" {
+				if len(evidence.Source) > 255 || strings.ContainsAny(evidence.Source, "\r\n") {
+					return nil, errors.New("review source is invalid or too long")
+				}
+				n.Source = strings.TrimSpace(evidence.Source)
+			}
+			if evidence.Reference != "" {
+				if err := validateSafeRef(evidence.Reference); err != nil {
+					return nil, err
+				}
+				n.EvidenceReference = strings.TrimSpace(evidence.Reference)
+			}
+			var err error
+			n.Source, n.EvidenceKind, n.Certainty, err = normalizeEvidence(n.Source, n.EvidenceKind, n.Certainty)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if err := candidate.AddNode(n); err != nil {
 			return nil, err
