@@ -525,6 +525,23 @@ func TestManualMutationPreviewRequiresMatchingRevisionAndPayload(t *testing.T) {
 	if saved.Name != "After" {
 		t.Fatalf("previewed mutation did not apply: %+v", saved)
 	}
+	relation := loaded.Relations()[0]
+	relation.EvidenceKind, relation.Certainty = graph.EvidenceObserved, graph.CertaintyConfirmed
+	evidenceMutation := graph.ManualMutation{Kind: "updateRelation", ID: relation.ID, Relation: &relation}
+	evidencePlan, err := store.PreviewManualMutation(ctx, evidenceMutation)
+	if err != nil || len(evidencePlan.Delta.UpdatedRelations) != 1 {
+		t.Fatalf("relation evidence preview failed: %+v %v", evidencePlan, err)
+	}
+	if _, err = store.ApplyManualMutation(ctx, evidenceMutation, evidencePlan.ExpectedRevision, evidencePlan.PlanHash); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = store.LoadSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Relations()[0]; got.EvidenceKind != graph.EvidenceObserved || got.Certainty != graph.CertaintyConfirmed {
+		t.Fatalf("relation evidence mutation did not persist: %+v", got)
+	}
 	if _, err = store.PreviewManualMutation(ctx, graph.ManualMutation{Kind: "deleteRelation", ID: "knows"}); err == nil {
 		t.Fatal("disconnecting mutation should fail during preview")
 	}
