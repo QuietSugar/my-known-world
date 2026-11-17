@@ -208,18 +208,28 @@ func TestManualMutationPreviewAndApplyHMAC(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &plan); err != nil {
 				t.Fatal(err)
 			}
-			apply := func(revision, mac string) int {
-				body, _ := json.Marshal(map[string]any{"mutation": tc.mutation, "expectedRevision": revision, "planHash": mac})
+			apply := func(mutation graph.ManualMutation, revision, mac string) int {
+				body, _ := json.Marshal(map[string]any{"mutation": mutation, "expectedRevision": revision, "planHash": mac})
 				r := httptest.NewRequest(http.MethodPost, "/api/operations/apply", bytes.NewReader(body))
 				r.Header.Set("Authorization", "Bearer "+token)
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, r)
 				return w.Code
 			}
-			if status := apply("different-revision", plan.PlanHash); status != http.StatusConflict {
+			before, _ := repo.g.Fingerprint()
+			tampered := tc.mutation
+			tampered.ID = "tampered"
+			if status := apply(tampered, plan.ExpectedRevision, plan.PlanHash); status != http.StatusConflict {
+				t.Fatalf("MAC accepted a changed payload: %d", status)
+			}
+			if status := apply(tc.mutation, "different-revision", plan.PlanHash); status != http.StatusConflict {
 				t.Fatalf("MAC accepted a different revision: %d", status)
 			}
-			if status := apply(plan.ExpectedRevision, plan.PlanHash); status != http.StatusOK {
+			after, _ := repo.g.Fingerprint()
+			if before != after {
+				t.Fatal("rejected manual plan partially mutated graph")
+			}
+			if status := apply(tc.mutation, plan.ExpectedRevision, plan.PlanHash); status != http.StatusOK {
 				t.Fatalf("apply: %d", status)
 			}
 		})
