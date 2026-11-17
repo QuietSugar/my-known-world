@@ -88,7 +88,7 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/replace-with-a-long-random-password/ci-only-url-safe-password-1234567890/' .env
-          sed -i 's/IMAGE_TAG=v0.0.4/IMAGE_TAG=ci/' .env
+          sed -i 's/IMAGE_TAG=v0.0.5/IMAGE_TAG=ci/' .env
       - name: Start Compose stack
         run: docker compose up -d --no-build
       - name: Wait for healthy application
