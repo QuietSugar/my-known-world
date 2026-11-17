@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
@@ -177,7 +176,16 @@ func validateSyncUndoState(ctx context.Context, tx queryer, metadata syncUndoMet
 		return err
 	}
 	expected := metadata.AppliedState
-	if state.Source != expected.Source || state.SourceHash != expected.SourceHash || state.ParserVersion != expected.ParserVersion || !state.AppliedAt.Equal(expected.AppliedAt) || !reflect.DeepEqual(mappings, metadata.AppliedMappings) {
+	mappingsMatch := len(mappings) == len(metadata.AppliedMappings)
+	if mappingsMatch {
+		for i := range mappings {
+			if mappings[i] != metadata.AppliedMappings[i] {
+				mappingsMatch = false
+				break
+			}
+		}
+	}
+	if state.Source != expected.Source || state.SourceHash != expected.SourceHash || state.ParserVersion != expected.ParserVersion || !state.AppliedAt.Equal(expected.AppliedAt) || !mappingsMatch {
 		return errors.New("sync source state or identity mappings changed since the operation; undo rejected")
 	}
 	return nil
