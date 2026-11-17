@@ -31,8 +31,9 @@ type ManualMutationApplier interface {
 type MutationOperationReader interface {
 	MutationOperations(context.Context, int) ([]graph.MutationOperation, error)
 }
-type OperationUndoer interface {
-	UndoOperation(context.Context, int64) error
+type UndoPlanWriter interface {
+	PreviewUndoOperation(context.Context, int64) (graph.MutationPlan, error)
+	UndoOperationPlanned(context.Context, int64, string) error
 }
 type NodeCreator interface {
 	CreateNode(context.Context, graph.Node, graph.Relation) error
@@ -47,11 +48,16 @@ type RelationEditor interface {
 type SourcePolicyReader interface {
 	SourcePolicies(context.Context) ([]graph.SourcePolicy, error)
 }
-type SourcePolicyWriter interface {
-	SetSourcePolicy(context.Context, graph.SourcePolicy) error
+type GuardedSourcePolicyWriter interface {
+	PreviewSourcePolicy(context.Context, graph.SourcePolicy) (graph.MutationPlan, *graph.SourcePolicy, error)
+	ApplySourcePolicy(context.Context, graph.SourcePolicy, string) error
 }
-type FieldResolutionWriter interface {
-	ResolveField(context.Context, graph.FieldResolution) (graph.FieldResolution, error)
+type GuardedFieldResolutionWriter interface {
+	PreviewFieldResolution(context.Context, graph.FieldResolution) (graph.MutationPlan, error)
+	ApplyFieldResolution(context.Context, graph.FieldResolution, string) (graph.FieldResolution, error)
+}
+type SyncPlanApplier interface {
+	ApplySyncPlan(context.Context, graph.SourceBatch, string) (*graph.SyncPreview, error)
 }
 type ProvisionalEvidenceReviewer interface {
 	ReviewProvisionalWithEvidence(context.Context, string, graph.NodeType, graph.ProvisionalReviewEvidence) error
@@ -89,16 +95,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	path := strings.TrimSuffix(r.URL.Path, "/")
-	if r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/nodes/") {
-		h.deleteNode(w, r, path)
-		return
-	}
-	if r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/relations/") {
-		h.deleteRelation(w, r, path)
+	if r.Method == http.MethodDelete && (strings.HasPrefix(path, "/api/nodes/") || strings.HasPrefix(path, "/api/relations/")) {
+		h.rejectUnpreviewedWrite(w, r)
 		return
 	}
 	if r.Method == http.MethodPut && strings.HasPrefix(path, "/api/nodes/") {
-		h.updateNode(w, r, path)
+		h.rejectUnpreviewedWrite(w, r)
 		return
 	}
 	if r.Method == http.MethodPost {
@@ -106,11 +108,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case path == "/api/sync/preview":
 			h.preview(w, r)
 			return
-		case path == "/api/relations":
-			h.addRelation(w, r)
-			return
-		case path == "/api/nodes":
-			h.createNode(w, r)
+		case path == "/api/relations" || path == "/api/nodes":
+			h.rejectUnpreviewedWrite(w, r)
 			return
 		case path == "/api/operations/preview":
 			h.previewManualMutation(w, r)
@@ -118,20 +117,38 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case path == "/api/operations/apply":
 			h.applyManualMutation(w, r)
 			return
+		case strings.HasPrefix(path, "/api/operations/") && strings.HasSuffix(path, "/undo/preview"):
+			h.previewUndo(w, r, path)
+			return
+		case strings.HasPrefix(path, "/api/operations/") && strings.HasSuffix(path, "/undo/apply"):
+			h.applyUndo(w, r, path)
+			return
 		case strings.HasPrefix(path, "/api/operations/") && strings.HasSuffix(path, "/undo"):
-			h.undoOperation(w, r, path)
+			h.rejectUnpreviewedWrite(w, r)
 			return
 		case path == "/api/sync/apply":
 			h.apply(w, r)
 			return
+		case path == "/api/assertions/resolve/preview":
+			h.previewAssertionResolution(w, r)
+			return
+		case path == "/api/assertions/resolve/apply":
+			h.applyAssertionResolution(w, r)
+			return
 		case path == "/api/assertions/resolve":
-			h.resolveAssertion(w, r)
+			h.rejectUnpreviewedWrite(w, r)
+			return
+		case path == "/api/sync/policies/preview":
+			h.previewSourcePolicy(w, r)
+			return
+		case path == "/api/sync/policies/apply":
+			h.applySourcePolicy(w, r)
 			return
 		case path == "/api/sync/policies":
-			h.setSourcePolicy(w, r)
+			h.rejectUnpreviewedWrite(w, r)
 			return
 		case strings.HasPrefix(path, "/api/provisionals/"):
-			h.review(w, r, path)
+			h.rejectUnpreviewedWrite(w, r)
 			return
 		}
 	}
@@ -373,58 +390,150 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "sync_preview_failed", err.Error())
 		return
 	}
+	if preview.ExpectedRevision != "" {
+		preview.PlanHash, err = guardedPlanMAC(h.WriteToken, "sync-batch", preview.ExpectedRevision, batch)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "plan_failed", "could not create sync plan")
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, preview)
 }
 
-func (h *Handler) setSourcePolicy(w http.ResponseWriter, r *http.Request) {
-	if !h.authorized(w, r) {
-		return
+func guardedPlanMAC(token, kind string, revision string, payload any) (string, error) {
+	body, err := json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Revision string `json:"revision"`
+		Payload  any    `json:"payload"`
+	}{kind, revision, payload})
+	if err != nil {
+		return "", err
 	}
-	writer, ok := h.Repository.(SourcePolicyWriter)
+	mac := hmac.New(sha256.New, []byte(token))
+	if _, err = mac.Write(body); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+func (h *Handler) previewSourcePolicy(w http.ResponseWriter, r *http.Request) {
+	planner, ok := h.Repository.(GuardedSourcePolicyWriter)
 	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "source policies require PostgreSQL")
+		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "source policy preview requires PostgreSQL")
 		return
 	}
-	var policy graph.SourcePolicy
-	if err := decodeBody(w, r, 32<<10, &policy); err != nil {
+	var body struct {
+		Policy graph.SourcePolicy `json:"policy"`
+	}
+	if err := decodeBody(w, r, 32<<10, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	if err := policy.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_policy", err.Error())
+	plan, previous, err := planner.PreviewSourcePolicy(r.Context(), body.Policy)
+	if err != nil {
+		writeError(w, http.StatusConflict, "preview_rejected", err.Error())
 		return
 	}
-	if err := writer.SetSourcePolicy(r.Context(), policy); err != nil {
-		writeError(w, http.StatusInternalServerError, "policy_failed", err.Error())
+	plan.PlanHash, err = guardedPlanMAC(h.WriteToken, "source-policy", plan.ExpectedRevision, body.Policy)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "plan_failed", "could not create preview plan")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "policy": policy})
+	writeJSON(w, http.StatusOK, map[string]any{"plan": plan, "previousPolicy": previous, "policy": body.Policy})
 }
 
-func (h *Handler) resolveAssertion(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) applySourcePolicy(w http.ResponseWriter, r *http.Request) {
 	if !h.authorized(w, r) {
 		return
 	}
-	writer, ok := h.Repository.(FieldResolutionWriter)
+	writer, ok := h.Repository.(GuardedSourcePolicyWriter)
 	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "resolution_unavailable", "field resolutions require PostgreSQL")
+		writeError(w, http.StatusServiceUnavailable, "policy_unavailable", "source policy apply requires PostgreSQL")
 		return
 	}
-	var resolution graph.FieldResolution
-	if err := decodeBody(w, r, 32<<10, &resolution); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid field resolution: %v", err))
+	var body struct {
+		Policy           graph.SourcePolicy `json:"policy"`
+		ExpectedRevision string             `json:"expectedRevision"`
+		PlanHash         string             `json:"planHash"`
+	}
+	if err := decodeBody(w, r, 32<<10, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	if err := resolution.Validate(); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_resolution", err.Error())
+	expected, err := guardedPlanMAC(h.WriteToken, "source-policy", body.ExpectedRevision, body.Policy)
+	if err != nil || !hmac.Equal([]byte(expected), []byte(body.PlanHash)) {
+		writeError(w, http.StatusConflict, "policy_rejected", "plan does not match the previewed policy and revision")
 		return
 	}
-	created, err := writer.ResolveField(r.Context(), resolution)
+	if err = writer.ApplySourcePolicy(r.Context(), body.Policy, body.ExpectedRevision); err != nil {
+		writeError(w, http.StatusConflict, "policy_rejected", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "policy": body.Policy})
+}
+
+func (h *Handler) previewAssertionResolution(w http.ResponseWriter, r *http.Request) {
+	planner, ok := h.Repository.(GuardedFieldResolutionWriter)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "resolution_unavailable", "field resolution preview requires PostgreSQL")
+		return
+	}
+	var body struct {
+		Resolution graph.FieldResolution `json:"resolution"`
+	}
+	if err := decodeBody(w, r, 32<<10, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	plan, err := planner.PreviewFieldResolution(r.Context(), body.Resolution)
+	if err != nil {
+		writeError(w, http.StatusConflict, "preview_rejected", err.Error())
+		return
+	}
+	plan.PlanHash, err = guardedPlanMAC(h.WriteToken, "field-resolution", plan.ExpectedRevision, body.Resolution)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "plan_failed", "could not create preview plan")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"plan": plan, "resolution": body.Resolution})
+}
+
+func (h *Handler) applyAssertionResolution(w http.ResponseWriter, r *http.Request) {
+	if !h.authorized(w, r) {
+		return
+	}
+	writer, ok := h.Repository.(GuardedFieldResolutionWriter)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "resolution_unavailable", "field resolution apply requires PostgreSQL")
+		return
+	}
+	var body struct {
+		Resolution       graph.FieldResolution `json:"resolution"`
+		ExpectedRevision string                `json:"expectedRevision"`
+		PlanHash         string                `json:"planHash"`
+	}
+	if err := decodeBody(w, r, 32<<10, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	expected, err := guardedPlanMAC(h.WriteToken, "field-resolution", body.ExpectedRevision, body.Resolution)
+	if err != nil || !hmac.Equal([]byte(expected), []byte(body.PlanHash)) {
+		writeError(w, http.StatusConflict, "resolution_rejected", "plan does not match the previewed decision and revision")
+		return
+	}
+	created, err := writer.ApplyFieldResolution(r.Context(), body.Resolution, body.ExpectedRevision)
 	if err != nil {
 		writeError(w, http.StatusConflict, "resolution_rejected", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func (h *Handler) rejectUnpreviewedWrite(w http.ResponseWriter, r *http.Request) {
+	if !h.authorized(w, r) {
+		return
+	}
+	writeError(w, http.StatusPreconditionRequired, "preview_required", "this write route is retired; use the server-side preview and guarded apply workflow")
 }
 
 func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
@@ -435,12 +544,49 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "persistent graph repository is not configured; set DATABASE_URL to a PostgreSQL connection string to enable persistent writes")
 		return
 	}
-	var batch graph.SourceBatch
-	if err := decodeBody(w, r, 8<<20, &batch); err != nil {
+	var raw map[string]json.RawMessage
+	if err := decodeBody(w, r, 8<<20, &raw); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if raw["batch"] == nil || raw["expectedRevision"] == nil || raw["planHash"] == nil {
+		writeError(w, http.StatusPreconditionRequired, "preview_required", "apply requires the exact batch, expectedRevision, and planHash from a server preview")
+		return
+	}
+	if len(raw) != 3 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "unexpected apply fields")
+		return
+	}
+	var body struct {
+		Batch            graph.SourceBatch
+		ExpectedRevision string
+		PlanHash         string
+	}
+	batchDecoder := json.NewDecoder(strings.NewReader(string(raw["batch"])))
+	batchDecoder.DisallowUnknownFields()
+	if err := batchDecoder.Decode(&body.Batch); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid sync batch: %v", err))
 		return
 	}
-	preview, err := h.Repository.ApplySync(r.Context(), batch)
+	if err := json.Unmarshal(raw["expectedRevision"], &body.ExpectedRevision); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "expectedRevision must be a string")
+		return
+	}
+	if err := json.Unmarshal(raw["planHash"], &body.PlanHash); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "planHash must be a string")
+		return
+	}
+	applier, ok := h.Repository.(SyncPlanApplier)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "guarded sync apply requires PostgreSQL")
+		return
+	}
+	expected, err := guardedPlanMAC(h.WriteToken, "sync-batch", body.ExpectedRevision, body.Batch)
+	if err != nil || !hmac.Equal([]byte(expected), []byte(body.PlanHash)) {
+		writeError(w, http.StatusConflict, "sync_rejected", "plan does not match the previewed batch and revision")
+		return
+	}
+	preview, err := applier.ApplySyncPlan(r.Context(), body.Batch, body.ExpectedRevision)
 	if err != nil {
 		writeError(w, http.StatusConflict, "sync_rejected", err.Error())
 		return
@@ -514,26 +660,69 @@ func (h *Handler) applyManualMutation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"applied": true, "plan": plan})
 }
 
-func (h *Handler) undoOperation(w http.ResponseWriter, r *http.Request, path string) {
-	if !h.authorized(w, r) {
-		return
-	}
-	undoer, ok := h.Repository.(OperationUndoer)
-	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "undo_unavailable", "undo requires PostgreSQL")
-		return
-	}
-	raw := strings.TrimSuffix(strings.TrimPrefix(path, "/api/operations/"), "/undo")
+func operationIDFromPath(path, suffix string) (int64, error) {
+	raw := strings.TrimSuffix(strings.TrimPrefix(path, "/api/operations/"), suffix)
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id < 1 {
-		writeError(w, http.StatusBadRequest, "invalid_operation", "operation ID must be a positive integer")
+		return 0, errors.New("operation ID must be a positive integer")
+	}
+	return id, nil
+}
+func (h *Handler) previewUndo(w http.ResponseWriter, r *http.Request, path string) {
+	planner, ok := h.Repository.(UndoPlanWriter)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "undo_unavailable", "undo preview requires PostgreSQL")
 		return
 	}
-	if err = undoer.UndoOperation(r.Context(), id); err != nil {
+	id, err := operationIDFromPath(path, "/undo/preview")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_operation", err.Error())
+		return
+	}
+	plan, err := planner.PreviewUndoOperation(r.Context(), id)
+	if err != nil {
 		writeError(w, http.StatusConflict, "undo_rejected", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"undone": id})
+	plan.PlanHash, err = guardedPlanMAC(h.WriteToken, "undo-operation", plan.ExpectedRevision, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "plan_failed", "could not create undo plan")
+		return
+	}
+	writeJSON(w, http.StatusOK, plan)
+}
+func (h *Handler) applyUndo(w http.ResponseWriter, r *http.Request, path string) {
+	if !h.authorized(w, r) {
+		return
+	}
+	planner, ok := h.Repository.(UndoPlanWriter)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "undo_unavailable", "undo apply requires PostgreSQL")
+		return
+	}
+	id, err := operationIDFromPath(path, "/undo/apply")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_operation", err.Error())
+		return
+	}
+	var body struct {
+		ExpectedRevision string `json:"expectedRevision"`
+		PlanHash         string `json:"planHash"`
+	}
+	if err = decodeBody(w, r, 16<<10, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	expected, err := guardedPlanMAC(h.WriteToken, "undo-operation", body.ExpectedRevision, id)
+	if err != nil || !hmac.Equal([]byte(expected), []byte(body.PlanHash)) {
+		writeError(w, http.StatusConflict, "undo_rejected", "plan does not match the previewed operation and revision")
+		return
+	}
+	if err = planner.UndoOperationPlanned(r.Context(), id, body.ExpectedRevision); err != nil {
+		writeError(w, http.StatusConflict, "undo_rejected", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"undone": id})
 }
 
 func (h *Handler) createNode(w http.ResponseWriter, r *http.Request) {

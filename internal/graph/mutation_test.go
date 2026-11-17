@@ -53,3 +53,32 @@ func TestManualMutationPlanHasDeterministicDeltaAndDoesNotMutate(t *testing.T) {
 		t.Fatal("mutation plan hash is not deterministic")
 	}
 }
+
+func TestProvisionalReviewUsesManualMutationPlan(t *testing.T) {
+	g := New()
+	_ = g.AddNode(Node{ID: "self", Type: Self, Name: "Self", ModelVersion: 1})
+	if err := g.Publish(Node{ID: "pending", Type: ProvisionalObject, Name: "Candidate", ModelVersion: 1, CandidateType: Machine, ReviewStatus: "pending"}, Relation{ID: "knows-pending", Predicate: KnowsAbout, To: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	mutation := ManualMutation{Kind: "reviewProvisional", ID: "pending", TargetType: Machine, ReviewEvidence: &ProvisionalReviewEvidence{Certainty: CertaintyConfirmed, Source: "human-review", Reference: "ticket:42"}}
+	candidate, err := g.ApplyManualMutation(mutation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := g.Node("pending")
+	after, _ := candidate.Node("pending")
+	if before.Type != ProvisionalObject || after.Type != Machine || after.Source != "human-review" || after.Certainty != CertaintyConfirmed || after.EvidenceReference != "ticket:42" {
+		t.Fatalf("unexpected review result: before=%+v after=%+v", before, after)
+	}
+	if len(DiffGraphs(g, candidate).UpdatedNodes) != 1 {
+		t.Fatal("review plan should describe the updated node")
+	}
+	rejected, err := g.ApplyManualMutation(ManualMutation{Kind: "rejectProvisional", ID: "pending"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejectedNode, _ := rejected.Node("pending")
+	if rejectedNode.ReviewStatus != "rejected" {
+		t.Fatalf("reject mutation did not retain rejected candidate: %+v", rejectedNode)
+	}
+}

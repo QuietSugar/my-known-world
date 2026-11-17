@@ -36,7 +36,20 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Race-enabled tests
-        run: go test -race ./...
+        run: go test -race ./... 2>&1 | tee go-test.log; test ${PIPESTATUS[0]} -eq 0
+      - name: Surface Go test failure details
+        if: always()
+        run: |
+          if [ -f go-test.log ]; then
+            grep -E -B 4 -A 8 '(^FAIL|--- FAIL:|WARNING: DATA RACE|fatal error:|panic:|Error Trace:|Error:)' go-test.log | tail -n 40 | while IFS= read -r line; do echo "::error::$line"; done || true
+          fi
+      - name: Preserve Go test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-output
+          path: go-test.log
+          if-no-files-found: ignore
 
   web:
     runs-on: ubuntu-latest
@@ -75,7 +88,7 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/replace-with-a-long-random-password/ci-only-url-safe-password-1234567890/' .env
-          sed -i 's/IMAGE_TAG=v0.0.3/IMAGE_TAG=ci/' .env
+          sed -i 's/IMAGE_TAG=v0.0.4/IMAGE_TAG=ci/' .env
       - name: Start Compose stack
         run: docker compose up -d --no-build
       - name: Wait for healthy application

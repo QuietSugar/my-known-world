@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -
     && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w" -o /out/myknownworld-markdown-import ./cmd/myknownworld-markdown-import
 
 FROM alpine:3.22 AS runtime
-ARG VERSION=0.0.3
+ARG VERSION=0.0.4
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="MyKnownWorld" \
       org.opencontainers.image.description="Personal cognitive graph web application and API" \

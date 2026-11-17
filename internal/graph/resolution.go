@@ -18,6 +18,9 @@ type FieldResolution struct {
 }
 
 func (r FieldResolution) Validate() error {
+	if r.ID != 0 || !r.RecordedAt.IsZero() {
+		return errors.New("id and recordedAt are server-assigned")
+	}
 	if r.NodeID == "" || r.FieldPath == "" || len(r.SelectedAssertionIDs) == 0 {
 		return errors.New("nodeId, fieldPath, and selectedAssertionIds are required")
 	}

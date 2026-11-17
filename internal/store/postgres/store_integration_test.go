@@ -229,6 +229,17 @@ func TestFieldResolutionsAppendAndValidateSelectedAssertions(t *testing.T) {
 	if err := store.SaveSnapshot(ctx, g); err != nil {
 		t.Fatal(err)
 	}
+	guarded := graph.FieldResolution{NodeID: "m", FieldPath: "machine.hostname", SelectedAssertionIDs: []string{"b"}, RationaleReference: "ticket:guarded"}
+	resolutionPlan, err := store.PreviewFieldResolution(ctx, guarded)
+	if err != nil || resolutionPlan.ExpectedRevision == "" {
+		t.Fatalf("resolution preview failed: %+v %v", resolutionPlan, err)
+	}
+	if _, err = store.ApplyFieldResolution(ctx, guarded, resolutionPlan.ExpectedRevision); err != nil {
+		t.Fatalf("guarded resolution apply failed: %v", err)
+	}
+	if _, err = store.ApplyFieldResolution(ctx, guarded, resolutionPlan.ExpectedRevision); err == nil {
+		t.Fatal("replayed stale resolution plan was accepted")
+	}
 	decision, err := store.ResolveField(ctx, graph.FieldResolution{NodeID: "m", FieldPath: "machine.hostname", SelectedAssertionIDs: []string{"b"}, RationaleReference: "ticket:42"})
 	if err != nil || decision.ID == 0 {
 		t.Fatalf("resolution failed: %+v %v", decision, err)
@@ -237,7 +248,7 @@ func TestFieldResolutionsAppendAndValidateSelectedAssertions(t *testing.T) {
 		t.Fatal(err)
 	}
 	items, err := store.FieldResolutions(ctx, "m")
-	if err != nil || len(items) != 2 {
+	if err != nil || len(items) != 3 {
 		t.Fatalf("resolution history failed: %+v %v", items, err)
 	}
 	views, err := store.AssertionViews(ctx, "m")
@@ -277,6 +288,18 @@ func TestSourcePolicyConstrainsPreviewAndAtomicApply(t *testing.T) {
 	if err := store.SetSourcePolicy(ctx, policy); err != nil {
 		t.Fatal(err)
 	}
+	updatedPolicy := policy
+	updatedPolicy.Priority = 45
+	policyPlan, _, err := store.PreviewSourcePolicy(ctx, updatedPolicy)
+	if err != nil || policyPlan.ExpectedRevision == "" {
+		t.Fatalf("source policy preview failed: %+v %v", policyPlan, err)
+	}
+	if err = store.ApplySourcePolicy(ctx, updatedPolicy, policyPlan.ExpectedRevision); err != nil {
+		t.Fatalf("guarded policy apply failed: %v", err)
+	}
+	if err = store.ApplySourcePolicy(ctx, updatedPolicy, policyPlan.ExpectedRevision); err == nil {
+		t.Fatal("replayed stale policy plan was accepted")
+	}
 	batch := graph.SourceBatch{Source: "inventory", Nodes: []graph.Node{{ID: "product", Type: graph.Product, Name: "Out of scope", ModelVersion: 1}}}
 	preview, err := store.PreviewSync(ctx, batch)
 	if err != nil || len(preview.Conflicts) == 0 {
@@ -295,6 +318,81 @@ func TestSourcePolicyConstrainsPreviewAndAtomicApply(t *testing.T) {
 	policies, err := store.SourcePolicies(ctx)
 	if err != nil || len(policies) != 1 {
 		t.Fatalf("policy persistence failed: %+v %v", policies, err)
+	}
+}
+
+func TestGuardedSyncApplyBindsRevisionAndBatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	store := openTestStore(t)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base := graph.New()
+	_ = base.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
+	if err := store.SaveSnapshot(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	batch := graph.SourceBatch{Source: "guarded", Nodes: []graph.Node{{ID: "host", Type: graph.Machine, Name: "Host", ModelVersion: 1}}, Relations: []graph.Relation{{ID: "self-host", From: "self", Predicate: graph.KnowsAbout, To: "host", Source: "guarded"}}}
+	preview, err := store.PreviewSync(ctx, batch)
+	if err != nil || preview.ExpectedRevision == "" {
+		t.Fatalf("sync preview failed: %+v %v", preview, err)
+	}
+	if _, err = store.ApplySyncPlan(ctx, batch, preview.ExpectedRevision); err != nil {
+		t.Fatalf("guarded sync apply failed: %v", err)
+	}
+	if _, err = store.ApplySyncPlan(ctx, batch, preview.ExpectedRevision); err == nil {
+		t.Fatal("replayed stale sync plan was accepted")
+	}
+	if _, err = store.PreviewSync(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSyncUndoRejectsSourceMetadataChangedWithoutGraphDiff(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	store := openTestStore(t)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base := graph.New()
+	_ = base.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
+	if err := store.SaveSnapshot(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	first := graph.SourceBatch{Source: "same-source", ParserVersion: "v1"}
+	p, err := store.PreviewSync(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ApplySyncPlan(ctx, first, p.ExpectedRevision); err != nil {
+		t.Fatal(err)
+	}
+	ops, err := store.MutationOperations(ctx, 10)
+	if err != nil || len(ops) != 1 || !ops[0].Reversible {
+		t.Fatalf("first sync operation should be reversible: %+v %v", ops, err)
+	}
+	firstID := ops[0].ID
+	second := graph.SourceBatch{Source: "same-source", ParserVersion: "v2"}
+	p, err = store.PreviewSync(ctx, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ApplySyncPlan(ctx, second, p.ExpectedRevision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.PreviewUndoOperation(ctx, firstID); err == nil {
+		t.Fatal("undo preview accepted outdated source metadata despite unchanged graph")
+	}
+	ops, err = store.MutationOperations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range ops {
+		if op.ID == firstID && op.Reversible {
+			t.Fatal("stale sync undo remained enabled")
+		}
 	}
 }
 
@@ -365,8 +463,15 @@ func TestManualOperationsCanOnlyUndoInSafeReverseOrder(t *testing.T) {
 	if err != nil || len(ops) != 2 || !ops[0].Reversible {
 		t.Fatalf("latest op should be reversible: %+v %v", ops, err)
 	}
-	if err = store.UndoOperation(ctx, ops[0].ID); err != nil {
+	undoPlan, planErr := store.PreviewUndoOperation(ctx, ops[0].ID)
+	if planErr != nil || undoPlan.ExpectedRevision == "" {
+		t.Fatalf("undo preview failed: %+v %v", undoPlan, planErr)
+	}
+	if err = store.UndoOperationPlanned(ctx, ops[0].ID, undoPlan.ExpectedRevision); err != nil {
 		t.Fatal(err)
+	}
+	if err = store.UndoOperationPlanned(ctx, ops[0].ID, undoPlan.ExpectedRevision); err == nil {
+		t.Fatal("replayed undo plan was accepted")
 	}
 	loaded, err := store.LoadSnapshot(ctx)
 	if err != nil {

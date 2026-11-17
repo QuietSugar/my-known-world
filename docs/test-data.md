@@ -28,13 +28,14 @@ The HTTP endpoint only previews. The `myknownworld-sync` command offers a guarde
 DATABASE_URL='postgresql://…' go run ./cmd/myknownworld-sync \
   -input internal/fixtures/synthetic-world.json
 
-# Apply is explicit and requires an exact source confirmation:
+# Copy the planHash from the preview output; application also requires source confirmation:
 DATABASE_URL='postgresql://…' go run ./cmd/myknownworld-sync \
   -input internal/fixtures/synthetic-world.json \
-  -apply -confirm-source synthetic-world-v1
+  -apply -confirm-source synthetic-world-v1 \
+  -confirm-plan-hash YOUR_PLAN_HASH_FROM_PREVIEW
 ```
 
-Applying uses the atomic `Store.ApplySync` transaction and does not replace unrelated sources. Always target a disposable test database, never your personal-data database. The integration test still independently covers apply and round-trip in an isolated schema.
+Applying uses the atomic `Store.ApplySyncPlan` transaction and rejects stale graphs or changed batch content; it does not replace unrelated sources. Always target a disposable test database, never your personal-data database. The integration test still independently covers apply and round-trip in an isolated schema.
 
 ## Maintenance rules
 
