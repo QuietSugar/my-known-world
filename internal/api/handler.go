@@ -94,7 +94,9 @@ type Handler struct {
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	path := strings.TrimSuffix(r.URL.Path, "/")
+	// Match routes against the escaped path so an encoded slash remains inside
+	// one identifier segment until that segment is explicitly unescaped.
+	path := strings.TrimSuffix(r.URL.EscapedPath(), "/")
 	if r.Method == http.MethodDelete && (strings.HasPrefix(path, "/api/nodes/") || strings.HasPrefix(path, "/api/relations/")) {
 		h.rejectUnpreviewedWrite(w, r)
 		return
@@ -267,7 +269,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/nodes/"), "/resolutions")
-		if id == "" || strings.Contains(id, "/") {
+		id, err := url.PathUnescape(id)
+		if err != nil || id == "" {
 			writeError(w, http.StatusNotFound, "not_found", "route not found")
 			return
 		}
@@ -279,7 +282,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"items": items})
 	case strings.HasPrefix(path, "/api/nodes/") && strings.HasSuffix(path, "/assertions"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api/nodes/"), "/assertions")
-		if id == "" || strings.Contains(id, "/") {
+		id, err := url.PathUnescape(id)
+		if err != nil || id == "" {
 			writeError(w, http.StatusNotFound, "not_found", "route not found")
 			return
 		}
@@ -299,8 +303,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": views})
 	case strings.HasPrefix(path, "/api/nodes/"):
-		id := strings.TrimPrefix(path, "/api/nodes/")
-		if id == "" || strings.Contains(id, "/") {
+		id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/nodes/"))
+		if err != nil || id == "" {
 			writeError(w, http.StatusNotFound, "not_found", "route not found")
 			return
 		}
@@ -312,7 +316,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, n)
 	case strings.HasPrefix(path, "/api/explore/"):
 		id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/explore/"))
-		if err != nil || id == "" || strings.Contains(id, "/") {
+		if err != nil || id == "" {
 			writeError(w, http.StatusBadRequest, "invalid_center", "center node id is invalid")
 			return
 		}
@@ -341,8 +345,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, result)
 	case strings.HasPrefix(path, "/api/path/"):
-		id := strings.TrimPrefix(path, "/api/path/")
-		if id == "" || strings.Contains(id, "/") {
+		id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/path/"))
+		if err != nil || id == "" {
 			writeError(w, http.StatusNotFound, "not_found", "route not found")
 			return
 		}
@@ -594,8 +598,12 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"applied": true, "preview": preview})
 }
 
-func mutationPlanMAC(token string, mutation graph.ManualMutation) (string, error) {
-	raw, err := json.Marshal(mutation)
+func mutationPlanMAC(token, revision string, mutation graph.ManualMutation) (string, error) {
+	raw, err := json.Marshal(struct {
+		Kind     string               `json:"kind"`
+		Revision string               `json:"revision"`
+		Mutation graph.ManualMutation `json:"mutation"`
+	}{"manual-mutation", revision, mutation})
 	if err != nil {
 		return "", err
 	}
@@ -621,7 +629,7 @@ func (h *Handler) previewManualMutation(w http.ResponseWriter, r *http.Request) 
 	}
 	plan, err := planner.PreviewManualMutation(r.Context(), body.Mutation)
 	if err == nil {
-		plan.PlanHash, err = mutationPlanMAC(h.WriteToken, body.Mutation)
+		plan.PlanHash, err = mutationPlanMAC(h.WriteToken, plan.ExpectedRevision, body.Mutation)
 	}
 	if err != nil {
 		writeError(w, http.StatusConflict, "preview_rejected", err.Error())
@@ -647,12 +655,17 @@ func (h *Handler) applyManualMutation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	expectedHash, hashErr := mutationPlanMAC(h.WriteToken, body.Mutation)
+	expectedHash, hashErr := mutationPlanMAC(h.WriteToken, body.ExpectedRevision, body.Mutation)
 	if hashErr != nil || !hmac.Equal([]byte(expectedHash), []byte(body.PlanHash)) {
 		writeError(w, http.StatusConflict, "mutation_rejected", "plan hash does not match the previewed payload")
 		return
 	}
-	plan, err := applier.ApplyManualMutation(r.Context(), body.Mutation, body.ExpectedRevision, body.PlanHash)
+	domainHash, err := body.Mutation.PlanHashValue()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_mutation", err.Error())
+		return
+	}
+	plan, err := applier.ApplyManualMutation(r.Context(), body.Mutation, body.ExpectedRevision, domainHash)
 	if err != nil {
 		writeError(w, http.StatusConflict, "mutation_rejected", err.Error())
 		return

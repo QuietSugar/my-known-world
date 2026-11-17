@@ -115,6 +115,36 @@ Body ignored
 	}
 }
 
+func TestMarkdownSoftwareInstanceDomainAliasAndAmbiguousKeys(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"singular.md":  "---\ntype: service\nname: Singular\ndomain:\n  - one.example.test\n  - two.example.test\n---\n",
+		"ambiguous.md": "---\ntype: service\nname: Ambiguous\ndomain: [singular.example.test]\ndomains: [plural.example.test]\n---\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 || report.Batch.Nodes[0].ID != "singular.md" {
+		t.Fatalf("both-key file should be excluded: nodes=%+v exclusions=%+v", report.Batch.Nodes, report.Exclusions)
+	}
+	node := report.Batch.Nodes[0]
+	if node.SoftwareInstance == nil || len(node.SoftwareInstance.Domains) != 2 || node.SoftwareInstance.Domains[1] != "two.example.test" {
+		t.Fatalf("singular domain alias not normalized: %+v", node.SoftwareInstance)
+	}
+	if !assertionPresent(report.Batch.Assertions, node.ID, "softwareInstance.domains") {
+		t.Fatal("singular domain alias did not emit the typed field assertion")
+	}
+	if len(report.Exclusions) != 1 || report.Exclusions[0].SourcePath != "ambiguous.md" || !strings.Contains(report.Exclusions[0].Reason, "both domain and domains") {
+		t.Fatalf("ambiguous domain keys need explicit exclusion: %+v", report.Exclusions)
+	}
+}
+
 func TestMarkdownFrontmatterRejectsInsecureConfigAndDoesNotApplyPartialScan(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "bad.md"), []byte("---\ntype: vm\n"), 0600); err != nil {

@@ -4,11 +4,13 @@ package mcpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -255,9 +257,19 @@ type HistoryInput struct {
 	ID         string `json:"id"`
 	Count      int    `json:"count,omitempty"`
 }
+type HistoryEventOutput struct {
+	ID         int64          `json:"id"`
+	RunID      *int64         `json:"runId,omitempty"`
+	Source     string         `json:"source"`
+	EntityType string         `json:"entityType"`
+	EntityID   string         `json:"entityId"`
+	Action     string         `json:"action"`
+	RecordedAt string         `json:"recordedAt"`
+	Snapshot   map[string]any `json:"snapshot,omitempty"`
+}
 type HistoryOutput struct {
-	Items []graph.ChangeEvent `json:"items"`
-	Count int                 `json:"count"`
+	Items []HistoryEventOutput `json:"items"`
+	Count int                  `json:"count"`
 }
 
 func (s *Server) entityHistory(ctx context.Context, _ *mcp.CallToolRequest, in HistoryInput) (*mcp.CallToolResult, HistoryOutput, error) {
@@ -283,5 +295,15 @@ func (s *Server) entityHistory(ctx context.Context, _ *mcp.CallToolRequest, in H
 	if items == nil {
 		items = []graph.ChangeEvent{}
 	}
-	return nil, HistoryOutput{Items: items, Count: len(items)}, nil
+	out := make([]HistoryEventOutput, 0, len(items))
+	for _, item := range items {
+		event := HistoryEventOutput{ID: item.ID, RunID: item.RunID, Source: item.Source, EntityType: item.EntityType, EntityID: item.EntityID, Action: item.Action, RecordedAt: item.RecordedAt.Format(time.RFC3339Nano)}
+		if len(item.Snapshot) != 0 && string(item.Snapshot) != "null" {
+			if err := json.Unmarshal(item.Snapshot, &event.Snapshot); err != nil {
+				return nil, HistoryOutput{}, fmt.Errorf("decode history snapshot: %w", err)
+			}
+		}
+		out = append(out, event)
+	}
+	return nil, HistoryOutput{Items: out, Count: len(out)}, nil
 }

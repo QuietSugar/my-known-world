@@ -24,6 +24,9 @@ func (m *memoryRepository) LoadSnapshot(context.Context) (*graph.Graph, error) {
 func (m *memoryRepository) EntityHistory(_ context.Context, kind, id string, _ int) ([]graph.ChangeEvent, error) {
 	return []graph.ChangeEvent{{ID: 1, EntityType: kind, EntityID: id, Source: "fixture", Action: "created"}}, nil
 }
+func (m *memoryRepository) FieldResolutions(_ context.Context, _ string) ([]graph.FieldResolution, error) {
+	return []graph.FieldResolution{}, nil
+}
 func (m *memoryRepository) ApplySync(_ context.Context, b graph.SourceBatch) (*graph.SyncPreview, error) {
 	next, p, err := m.g.ApplySync(b)
 	if err == nil {
@@ -36,6 +39,36 @@ func (m *memoryRepository) ApplySyncPlan(ctx context.Context, b graph.SourceBatc
 		return nil, errors.New("stale revision")
 	}
 	return m.ApplySync(ctx, b)
+}
+func (m *memoryRepository) PreviewManualMutation(_ context.Context, mutation graph.ManualMutation) (graph.MutationPlan, error) {
+	hash, err := mutation.PlanHashValue()
+	if err != nil {
+		return graph.MutationPlan{}, err
+	}
+	updated, err := m.g.ApplyManualMutation(mutation)
+	if err != nil {
+		return graph.MutationPlan{}, err
+	}
+	return graph.MutationPlan{ExpectedRevision: "memory-revision", PlanHash: hash, Delta: graph.DiffGraphs(m.g, updated)}, nil
+}
+func (m *memoryRepository) ApplyManualMutation(_ context.Context, mutation graph.ManualMutation, revision, expectedHash string) (graph.MutationPlan, error) {
+	if revision != "memory-revision" {
+		return graph.MutationPlan{}, errors.New("stale revision")
+	}
+	hash, err := mutation.PlanHashValue()
+	if err != nil {
+		return graph.MutationPlan{}, err
+	}
+	if hash != expectedHash {
+		return graph.MutationPlan{}, errors.New("mutation hash mismatch")
+	}
+	updated, err := m.g.ApplyManualMutation(mutation)
+	if err != nil {
+		return graph.MutationPlan{}, err
+	}
+	plan := graph.MutationPlan{ExpectedRevision: revision, PlanHash: hash, Delta: graph.DiffGraphs(m.g, updated)}
+	m.g = updated
+	return plan, nil
 }
 func (m *memoryRepository) ReviewProvisional(_ context.Context, id string, target graph.NodeType) error {
 	next, err := m.g.ReviewProvisional(id, target)
@@ -132,6 +165,84 @@ func TestWritesRequireConfiguredBearerTokenAndApplyBatch(t *testing.T) {
 	}
 	if _, ok := repo.g.Node("batch-node"); !ok {
 		t.Fatal("authorized batch wasn't applied")
+	}
+}
+
+func TestManualMutationPreviewAndApplyHMAC(t *testing.T) {
+	token := strings.Repeat("p", 32)
+	cases := []struct {
+		name     string
+		graph    func() *graph.Graph
+		mutation graph.ManualMutation
+	}{
+		{"createNode", func() *graph.Graph {
+			g := graph.New()
+			_ = g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Me", ModelVersion: 1})
+			return g
+		}, graph.ManualMutation{Kind: "createNode", Node: &graph.Node{ID: "doc", Type: graph.Document, Name: "Doc", ModelVersion: 1}, Relation: &graph.Relation{ID: "self-doc", From: "self", To: "doc", Predicate: graph.KnowsAbout}}},
+		{"reviewProvisional", func() *graph.Graph {
+			g := graph.New()
+			_ = g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Me", ModelVersion: 1})
+			_ = g.Publish(graph.Node{ID: "candidate", Type: graph.ProvisionalObject, Name: "Candidate", ModelVersion: 1, CandidateType: graph.Machine}, graph.Relation{ID: "self-candidate", From: "self", To: "candidate", Predicate: graph.KnowsAbout})
+			return g
+		}, graph.ManualMutation{Kind: "reviewProvisional", ID: "candidate", TargetType: graph.Machine}},
+		{"updateRelation", func() *graph.Graph {
+			g := graph.New()
+			_ = g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Me", ModelVersion: 1})
+			_ = g.Publish(graph.Node{ID: "host", Type: graph.Machine, Name: "Host", ModelVersion: 1}, graph.Relation{ID: "rel", From: "self", To: "host", Predicate: graph.KnowsAbout})
+			return g
+		}, graph.ManualMutation{Kind: "updateRelation", ID: "rel", Relation: &graph.Relation{ID: "rel", From: "self", To: "host", Predicate: graph.KnowsAbout, Certainty: graph.CertaintyConfirmed}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &memoryRepository{g: tc.graph()}
+			h := &Handler{Graph: repo.g, Repository: repo, WriteToken: token}
+			previewBody, _ := json.Marshal(map[string]any{"mutation": tc.mutation})
+			req := httptest.NewRequest(http.MethodPost, "/api/operations/preview", bytes.NewReader(previewBody))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("preview: %d %s", rec.Code, rec.Body.String())
+			}
+			var plan graph.MutationPlan
+			if err := json.Unmarshal(rec.Body.Bytes(), &plan); err != nil {
+				t.Fatal(err)
+			}
+			apply := func(revision, mac string) int {
+				body, _ := json.Marshal(map[string]any{"mutation": tc.mutation, "expectedRevision": revision, "planHash": mac})
+				r := httptest.NewRequest(http.MethodPost, "/api/operations/apply", bytes.NewReader(body))
+				r.Header.Set("Authorization", "Bearer "+token)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				return w.Code
+			}
+			if status := apply("different-revision", plan.PlanHash); status != http.StatusConflict {
+				t.Fatalf("MAC accepted a different revision: %d", status)
+			}
+			if status := apply(plan.ExpectedRevision, plan.PlanHash); status != http.StatusOK {
+				t.Fatalf("apply: %d", status)
+			}
+		})
+	}
+}
+
+func TestSlashNodeIDWorksAcrossReadRoutes(t *testing.T) {
+	g := graph.New()
+	if err := g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Me", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Publish(graph.Node{ID: "notes/README.md", Type: graph.Document, Name: "Notes", ModelVersion: 1}, graph.Relation{ID: "self-notes", From: "self", To: "notes/README.md", Predicate: graph.KnowsAbout}); err != nil {
+		t.Fatal(err)
+	}
+	repo := &memoryRepository{g: g}
+	h := &Handler{Graph: g, Repository: repo}
+	for _, route := range []string{"/api/nodes/notes%2FREADME.md", "/api/nodes/notes%2FREADME.md/assertions", "/api/nodes/notes%2FREADME.md/resolutions", "/api/path/notes%2FREADME.md", "/api/explore/notes%2FREADME.md?depth=1", "/api/entities/node/notes%2FREADME.md/history"} {
+		req := httptest.NewRequest(http.MethodGet, route, nil)
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, req)
+		if response.Code != http.StatusOK {
+			t.Errorf("GET %s: status=%d body=%s", route, response.Code, response.Body.String())
+		}
 	}
 }
 

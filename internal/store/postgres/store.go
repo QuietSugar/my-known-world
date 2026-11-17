@@ -19,7 +19,7 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-const schemaVersion = 16
+const schemaVersion = 17
 
 var ErrEmptySnapshot = errors.New("database contains no graph snapshot")
 
@@ -53,7 +53,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	files := []string{"migrations/001_init.sql", "migrations/002_provenance.sql", "migrations/003_sync_state.sql", "migrations/004_identity_mappings.sql", "migrations/005_provisional_review.sql", "migrations/006_running_periods.sql", "migrations/007_sync_history.sql", "migrations/008_field_assertions.sql", "migrations/009_typed_model_details.sql", "migrations/010_graph_change_history.sql", "migrations/011_field_resolutions.sql", "migrations/012_source_policies.sql", "migrations/013_usage_relationships.sql", "migrations/014_network_model.sql", "migrations/015_reversible_operations.sql", "migrations/016_sync_undo_metadata.sql"}
+	files := []string{"migrations/001_init.sql", "migrations/002_provenance.sql", "migrations/003_sync_state.sql", "migrations/004_identity_mappings.sql", "migrations/005_provisional_review.sql", "migrations/006_running_periods.sql", "migrations/007_sync_history.sql", "migrations/008_field_assertions.sql", "migrations/009_typed_model_details.sql", "migrations/010_graph_change_history.sql", "migrations/011_field_resolutions.sql", "migrations/012_source_policies.sql", "migrations/013_usage_relationships.sql", "migrations/014_network_model.sql", "migrations/015_reversible_operations.sql", "migrations/016_sync_undo_metadata.sql", "migrations/017_node_evidence_reference.sql"}
 	if len(files) != schemaVersion {
 		return fmt.Errorf("migration list has %d entries, schemaVersion is %d", len(files), schemaVersion)
 	}
@@ -105,7 +105,7 @@ func (s *Store) SaveSnapshot(ctx context.Context, g *graph.Graph) error {
 		if detailErr != nil {
 			return detailErr
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO nodes(id,type,name,lifecycle,last_confirmed,model_version,source,evidence_kind,certainty,candidate_type,review_status,review_questions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, n.ID, n.Type, n.Name, n.Lifecycle, n.LastConfirmed, n.ModelVersion, n.Source, n.EvidenceKind, n.Certainty, n.CandidateType, n.ReviewStatus, questions); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO nodes(id,type,name,lifecycle,last_confirmed,model_version,source,evidence_kind,certainty,candidate_type,review_status,review_questions,evidence_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, n.ID, n.Type, n.Name, n.Lifecycle, n.LastConfirmed, n.ModelVersion, n.Source, n.EvidenceKind, n.Certainty, n.CandidateType, n.ReviewStatus, questions, n.EvidenceReference); err != nil {
 			return fmt.Errorf("save node %q: %w", n.ID, err)
 		}
 		if err := insertTypedDetails(ctx, tx, n, modelDetails); err != nil {
@@ -169,7 +169,7 @@ func (s *Store) LoadSnapshot(ctx context.Context) (*graph.Graph, error) {
 
 func loadSnapshotTx(ctx context.Context, tx *sql.Tx) (*graph.Graph, error) {
 	g := graph.New()
-	rows, err := tx.QueryContext(ctx, `SELECT n.id,n.type,n.name,n.lifecycle,n.last_confirmed,n.model_version,n.source,n.evidence_kind,n.certainty,n.candidate_type,n.review_status,n.review_questions,rp.started_at,rp.ended_at,rp.deployed_version,rp.verification_at,rp.verification_result,rp.evidence_ref,hd.details,md.details,spd.details,sid.details,acd.details,pd.details,dd.details,rd.details,wid.details,nd.details FROM nodes n LEFT JOIN running_periods rp ON rp.node_id=n.id LEFT JOIN hardware_details hd ON hd.node_id=n.id LEFT JOIN machine_details md ON md.node_id=n.id LEFT JOIN software_project_details spd ON spd.node_id=n.id LEFT JOIN software_instance_details sid ON sid.node_id=n.id LEFT JOIN account_credential_details acd ON acd.node_id=n.id LEFT JOIN product_details pd ON pd.node_id=n.id LEFT JOIN document_details dd ON dd.node_id=n.id LEFT JOIN runbook_details rd ON rd.node_id=n.id LEFT JOIN work_item_details wid ON wid.node_id=n.id LEFT JOIN network_details nd ON nd.node_id=n.id ORDER BY n.id`)
+	rows, err := tx.QueryContext(ctx, `SELECT n.id,n.type,n.name,n.lifecycle,n.last_confirmed,n.model_version,n.source,n.evidence_kind,n.certainty,n.candidate_type,n.review_status,n.review_questions,n.evidence_reference,rp.started_at,rp.ended_at,rp.deployed_version,rp.verification_at,rp.verification_result,rp.evidence_ref,hd.details,md.details,spd.details,sid.details,acd.details,pd.details,dd.details,rd.details,wid.details,nd.details FROM nodes n LEFT JOIN running_periods rp ON rp.node_id=n.id LEFT JOIN hardware_details hd ON hd.node_id=n.id LEFT JOIN machine_details md ON md.node_id=n.id LEFT JOIN software_project_details spd ON spd.node_id=n.id LEFT JOIN software_instance_details sid ON sid.node_id=n.id LEFT JOIN account_credential_details acd ON acd.node_id=n.id LEFT JOIN product_details pd ON pd.node_id=n.id LEFT JOIN document_details dd ON dd.node_id=n.id LEFT JOIN runbook_details rd ON rd.node_id=n.id LEFT JOIN work_item_details wid ON wid.node_id=n.id LEFT JOIN network_details nd ON nd.node_id=n.id ORDER BY n.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -179,9 +179,9 @@ func loadSnapshotTx(ctx context.Context, tx *sql.Tx) (*graph.Graph, error) {
 		var confirmed sql.NullTime
 		var questions []byte
 		var started, ended, verified sql.NullTime
-		var deployed, verificationResult, evidenceRef sql.NullString
+		var deployed, verificationResult, evidenceRef, nodeEvidenceReference sql.NullString
 		var hardwareDetails, machineDetails, projectDetails, instanceDetails, credentialDetails, productDetails, documentDetails, runbookDetails, workDetails, networkDetails []byte
-		if err = rows.Scan(&n.ID, &typ, &n.Name, &n.Lifecycle, &confirmed, &n.ModelVersion, &n.Source, &evidenceKind, &certainty, &candidateType, &n.ReviewStatus, &questions, &started, &ended, &deployed, &verified, &verificationResult, &evidenceRef, &hardwareDetails, &machineDetails, &projectDetails, &instanceDetails, &credentialDetails, &productDetails, &documentDetails, &runbookDetails, &workDetails, &networkDetails); err != nil {
+		if err = rows.Scan(&n.ID, &typ, &n.Name, &n.Lifecycle, &confirmed, &n.ModelVersion, &n.Source, &evidenceKind, &certainty, &candidateType, &n.ReviewStatus, &questions, &nodeEvidenceReference, &started, &ended, &deployed, &verified, &verificationResult, &evidenceRef, &hardwareDetails, &machineDetails, &projectDetails, &instanceDetails, &credentialDetails, &productDetails, &documentDetails, &runbookDetails, &workDetails, &networkDetails); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -214,6 +214,9 @@ func loadSnapshotTx(ctx context.Context, tx *sql.Tx) (*graph.Graph, error) {
 			return nil, fmt.Errorf("load type details for %q: %w", n.ID, err)
 		}
 		n.CandidateType = graph.NodeType(candidateType)
+		if nodeEvidenceReference.Valid {
+			n.EvidenceReference = nodeEvidenceReference.String
+		}
 		if started.Valid {
 			n.StartedAt = &started.Time
 		}
@@ -1185,7 +1188,7 @@ func saveSnapshotTx(ctx context.Context, tx *sql.Tx, g *graph.Graph) error {
 		if detailErr != nil {
 			return detailErr
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(id,type,name,lifecycle,last_confirmed,model_version,source,evidence_kind,certainty,candidate_type,review_status,review_questions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, n.ID, n.Type, n.Name, n.Lifecycle, n.LastConfirmed, n.ModelVersion, n.Source, n.EvidenceKind, n.Certainty, n.CandidateType, n.ReviewStatus, questions); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO nodes(id,type,name,lifecycle,last_confirmed,model_version,source,evidence_kind,certainty,candidate_type,review_status,review_questions,evidence_reference) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, n.ID, n.Type, n.Name, n.Lifecycle, n.LastConfirmed, n.ModelVersion, n.Source, n.EvidenceKind, n.Certainty, n.CandidateType, n.ReviewStatus, questions, n.EvidenceReference); err != nil {
 			return fmt.Errorf("save node %q: %w", n.ID, err)
 		}
 		if err := insertTypedDetails(ctx, tx, n, modelDetails); err != nil {

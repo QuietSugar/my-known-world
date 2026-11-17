@@ -15,7 +15,7 @@ import (
 type historyFixture struct{}
 
 func (historyFixture) EntityHistory(_ context.Context, kind, id string, _ int) ([]graph.ChangeEvent, error) {
-	return []graph.ChangeEvent{{EntityType: kind, EntityID: id, Action: "updated"}}, nil
+	return []graph.ChangeEvent{{EntityType: kind, EntityID: id, Action: "updated", Snapshot: json.RawMessage(`{"id":"machine","type":"Machine","name":"Fixture machine"}`)}}, nil
 }
 
 func testGraph() *graph.Graph {
@@ -103,6 +103,17 @@ func TestMCPStreamableHTTPToolsAreTypedReadOnlyAndMatchGraphSemantics(t *testing
 	history, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "graph_history", Arguments: map[string]any{"entityType": "node", "id": "machine"}})
 	if err != nil || history.StructuredContent == nil {
 		t.Fatalf("graph_history failed: %v", err)
+	}
+	historyJSON, err := json.Marshal(history.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var historyOut HistoryOutput
+	if err = json.Unmarshal(historyJSON, &historyOut); err != nil {
+		t.Fatalf("decode structured history: %s: %v", historyJSON, err)
+	}
+	if historyOut.Count != 1 || len(historyOut.Items) != 1 || historyOut.Items[0].Snapshot["id"] != "machine" {
+		t.Fatalf("history snapshot missing or malformed: %s", historyJSON)
 	}
 }
 func containsAll(s string, needles ...string) bool {
