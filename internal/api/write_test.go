@@ -135,6 +135,58 @@ func TestWritesRequireConfiguredBearerTokenAndApplyBatch(t *testing.T) {
 	}
 }
 
+func TestIdentityMappingSyncPreviewPlanAppliesExactSubmittedBatch(t *testing.T) {
+	g := graph.New()
+	if err := g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Me", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Publish(graph.Node{ID: "stable-id", Type: graph.Machine, Name: "Before", Source: "inventory", ModelVersion: 1}, graph.Relation{ID: "knows-stable", From: "self", To: "stable-id", Predicate: graph.KnowsAbout, Source: "inventory"}); err != nil {
+		t.Fatal(err)
+	}
+	repo := &memoryRepository{g: g}
+	token := strings.Repeat("m", 32)
+	h := &Handler{Graph: g, Repository: repo, SyncPreviewer: repo, WriteToken: token}
+	batch := graph.SourceBatch{Source: "inventory", IdentityMappings: []graph.IdentityMapping{{SourceID: "renamed-id", NodeID: "stable-id"}}, Nodes: []graph.Node{{ID: "renamed-id", Type: graph.Machine, Name: "After", ModelVersion: 1}}, Relations: []graph.Relation{{ID: "knows-stable", From: "self", To: "renamed-id", Predicate: graph.KnowsAbout, Source: "inventory"}}}
+	batchJSON, err := json.Marshal(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/sync/preview", bytes.NewReader(batchJSON))
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", response.Code, response.Body.String())
+	}
+	var plan struct {
+		ExpectedRevision string `json:"expectedRevision"`
+		PlanHash         string `json:"planHash"`
+	}
+	if err = json.Unmarshal(response.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.ExpectedRevision == "" || plan.PlanHash == "" {
+		t.Fatalf("guarded preview omitted plan fields: %+v", plan)
+	}
+	applyJSON, err := json.Marshal(map[string]any{"batch": batch, "expectedRevision": plan.ExpectedRevision, "planHash": plan.PlanHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/sync/apply", bytes.NewReader(applyJSON))
+	request.Header.Set("Authorization", "Bearer "+token)
+	response = httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("exact rename batch rejected: status=%d body=%s", response.Code, response.Body.String())
+	}
+	node, ok := repo.g.Node("stable-id")
+	if !ok || node.Name != "After" {
+		t.Fatalf("stable identity was not updated: %+v", node)
+	}
+	if _, ok = repo.g.Node("renamed-id"); ok {
+		t.Fatal("rename created a second node")
+	}
+}
+
 func TestAuthenticatedProvisionalReviewEndpointRequiresPreview(t *testing.T) {
 	g := fixture()
 	if err := g.Publish(graph.Node{ID: "pending", Type: graph.ProvisionalObject, Name: "Pending", ModelVersion: 1, CandidateType: graph.Machine}, graph.Relation{ID: "pending-link", To: "pending"}); err != nil {

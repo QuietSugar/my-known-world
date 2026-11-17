@@ -79,6 +79,12 @@ type SyncPreview struct {
 }
 
 func canonicalizeBatch(batch SourceBatch) (SourceBatch, error) {
+	// SourceBatch is passed by value, but its slices still alias the caller's
+	// request. Copy the mutable slices before rewriting source IDs so preview
+	// cannot change the payload later used to bind an apply plan.
+	batch.Nodes = append([]Node(nil), batch.Nodes...)
+	batch.Relations = append([]Relation(nil), batch.Relations...)
+	batch.Assertions = append([]FieldAssertion(nil), batch.Assertions...)
 	mapping := map[string]string{}
 	for _, m := range batch.IdentityMappings {
 		if m.SourceID == "" || m.NodeID == "" || m.SourceID == m.NodeID {
