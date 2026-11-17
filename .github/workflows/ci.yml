@@ -41,7 +41,7 @@ jobs:
         if: always()
         run: |
           if [ -f go-test.log ]; then
-            tail -n 80 go-test.log | while IFS= read -r line; do echo "::error::$line"; done
+            grep -E -B 4 -A 8 '(^FAIL|--- FAIL:|WARNING: DATA RACE|fatal error:|panic:|Error Trace:|Error:)' go-test.log | tail -n 40 | while IFS= read -r line; do echo "::error::$line"; done || true
           fi
       - name: Preserve Go test output
         if: always()
