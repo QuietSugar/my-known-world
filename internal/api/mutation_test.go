@@ -2,10 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"github.com/QuietSugar/my-known-world/internal/graph"
 	"net/http"
 	"net/http/httptest"
@@ -46,10 +42,10 @@ func TestMutationPreviewIsReadOnlyAndApplyRequiresAuth(t *testing.T) {
 		t.Fatalf("unauthenticated apply status %d", w.Code)
 	}
 	mutation := graph.ManualMutation{Kind: "updateNode", ID: "machine", Node: &graph.Node{ID: "machine", Type: graph.Machine, Name: "Changed", ModelVersion: 1}}
-	raw, _ := json.Marshal(mutation)
-	mac := hmac.New(sha256.New, []byte(token))
-	_, _ = mac.Write(raw)
-	hash := hex.EncodeToString(mac.Sum(nil))
+	hash, err := mutationPlanMAC(token, "revision", mutation)
+	if err != nil {
+		t.Fatal(err)
+	}
 	applyBody := `{"mutation":{"kind":"updateNode","id":"machine","node":{"id":"machine","type":"Machine","name":"Changed","modelVersion":1}},"expectedRevision":"revision","planHash":"` + hash + `"}`
 	req = httptest.NewRequest(http.MethodPost, "/api/operations/apply", strings.NewReader(applyBody))
 	req.Header.Set("Authorization", "Bearer "+token)

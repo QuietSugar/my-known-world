@@ -45,6 +45,28 @@ func TestSyncPreviewApplyIsConservativeAndRepeatable(t *testing.T) {
 	}
 }
 
+func TestSyncPreviewDoesNotMutateSubmittedIdentityMappingBatch(t *testing.T) {
+	g := New()
+	_ = g.AddNode(Node{ID: "self", Type: Self, Name: "Me", ModelVersion: 1})
+	_ = g.Publish(Node{ID: "stable-id", Type: Machine, Name: "Before", Source: "inventory", ModelVersion: 1}, Relation{ID: "knows-stable", From: "self", To: "stable-id", Predicate: KnowsAbout, Source: "inventory"})
+	batch := SourceBatch{Source: "inventory", IdentityMappings: []IdentityMapping{{SourceID: "renamed-id", NodeID: "stable-id"}}, Nodes: []Node{{ID: "renamed-id", Type: Machine, Name: "After", ModelVersion: 1}}, Relations: []Relation{{ID: "knows-stable", From: "self", To: "renamed-id", Predicate: KnowsAbout, Source: "inventory"}}}
+	before, err := json.Marshal(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := g.PreviewSync(batch)
+	if len(preview.Conflicts) != 0 {
+		t.Fatalf("unexpected preview conflicts: %v", preview.Conflicts)
+	}
+	after, err := json.Marshal(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("preview mutated caller batch: before %s after %s", before, after)
+	}
+}
+
 func TestSyncRenameMappingPreservesCanonicalIdentity(t *testing.T) {
 	g := New()
 	_ = g.AddNode(Node{ID: "self", Type: Self, Name: "Me", ModelVersion: 1})

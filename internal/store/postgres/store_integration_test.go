@@ -349,6 +349,53 @@ func TestGuardedSyncApplyBindsRevisionAndBatch(t *testing.T) {
 	}
 }
 
+func TestProvisionalReviewEvidenceReferencePersistsAcrossStoreReopen(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	store := openTestStore(t)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	g := graph.New()
+	_ = g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
+	if err := g.Publish(graph.Node{ID: "pending", Type: graph.ProvisionalObject, Name: "Pending", ModelVersion: 1, CandidateType: graph.Document, ReviewStatus: "pending"}, graph.Relation{ID: "self-pending", From: "self", To: "pending", Predicate: graph.KnowsAbout}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSnapshot(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReviewProvisionalWithEvidence(ctx, "pending", graph.Document, graph.ProvisionalReviewEvidence{Certainty: graph.CertaintyConfirmed, EvidenceKind: graph.EvidenceManual, Source: "human-review-synthetic", Reference: "synthetic-review/acceptance"}); err != nil {
+		t.Fatal(err)
+	}
+	var schema string
+	if err := store.db.QueryRowContext(ctx, `SELECT current_schema()`).Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dsn, err := url.Parse(os.Getenv("POSTGRES_TEST_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := dsn.Query()
+	query.Set("search_path", schema)
+	dsn.RawQuery = query.Encode()
+	reopened, err := Open(ctx, dsn.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	loaded, err := reopened.LoadSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, ok := loaded.Node("pending")
+	if !ok || node.EvidenceReference != "synthetic-review/acceptance" {
+		t.Fatalf("review reference did not survive PostgreSQL reload: %+v", node)
+	}
+}
+
 func TestSyncUndoRejectsSourceMetadataChangedWithoutGraphDiff(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

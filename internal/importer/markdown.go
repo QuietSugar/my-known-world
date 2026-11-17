@@ -172,6 +172,12 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 	}
 	mapped := map[string]graph.Node{}
 	for _, f := range files {
+		if _, hasDomain := f.data["domain"]; hasDomain {
+			if _, hasDomains := f.data["domains"]; hasDomains {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "both domain and domains are present; file excluded to avoid ambiguous service domains"})
+				continue
+			}
+		}
 		collectSecretExclusions(f.rel, f.data, patterns, &report.Exclusions)
 		typeValue, _ := stringValue(f.data["type"])
 		target, hasMapping := cfgMap[strings.ToLower(strings.TrimSpace(typeValue))]
@@ -356,7 +362,11 @@ func machineDetails(m map[string]any, kindField, configuredKind string) (*graph.
 	return d, strings.Join(reasons, "; ")
 }
 func instanceDetails(m map[string]any) *graph.SoftwareInstanceDetails {
-	return &graph.SoftwareInstanceDetails{DeploymentPath: firstString(m, "deploy_path", "deployment_path"), Domains: stringList(m["domains"]), OperationalState: firstString(m, "status")}
+	domains := m["domains"]
+	if _, hasPlural := m["domains"]; !hasPlural {
+		domains = m["domain"]
+	}
+	return &graph.SoftwareInstanceDetails{DeploymentPath: firstString(m, "deploy_path", "deployment_path"), Domains: stringList(domains), OperationalState: firstString(m, "status")}
 }
 
 type markdownMappedField struct {
