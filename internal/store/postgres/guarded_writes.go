@@ -176,7 +176,8 @@ func validateSyncUndoState(ctx context.Context, tx queryer, metadata syncUndoMet
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(state, *metadata.AppliedState) || !reflect.DeepEqual(mappings, metadata.AppliedMappings) {
+	expected := metadata.AppliedState
+	if state.Source != expected.Source || state.SourceHash != expected.SourceHash || state.ParserVersion != expected.ParserVersion || !state.AppliedAt.Equal(expected.AppliedAt) || !reflect.DeepEqual(mappings, metadata.AppliedMappings) {
 		return errors.New("sync source state or identity mappings changed since the operation; undo rejected")
 	}
 	return nil
