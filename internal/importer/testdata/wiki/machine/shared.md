@@ -1,6 +1,9 @@
 ---
 type: shared
 name: Example shared VPS
+owned:
+  - application deployments
+  - local backups
 ip: 203.0.113.7
 status: active
 constraints:

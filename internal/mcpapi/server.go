@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,8 +38,8 @@ func NewServer(load GraphLoader, history HistoryReader, assertionReaders ...Asse
 	if len(assertionReaders) > 0 {
 		s.assertions = assertionReaders[0]
 	}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "my-known-world", Version: "0.0.5"}, nil)
-	mcp.AddTool(srv, &mcp.Tool{Name: "graph_query", Description: "Filter graph node summaries by explicit metadata and substring."}, s.query)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "my-known-world", Version: "0.0.6"}, nil)
+	mcp.AddTool(srv, &mcp.Tool{Name: "graph_query", Description: "Filter graph node summaries by type, lifecycle, certainty, evidence, hosting machine, and case-insensitive text across safe modeled fields."}, s.query)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_entity", Description: "Get typed node details, direct relations, Self path/category, and value-free assertion metadata."}, s.entity)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_relations", Description: "List direct relations for a node with direction and optional predicate filters."}, s.relations)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_impact", Description: "Return the existing confirmed operational impact paths from Self; knowsAbout is excluded."}, s.impact)
@@ -59,6 +60,7 @@ type QueryInput struct {
 	Lifecycle    string             `json:"lifecycle,omitempty"`
 	Certainty    graph.Certainty    `json:"certainty,omitempty"`
 	EvidenceKind graph.EvidenceKind `json:"evidenceKind,omitempty"`
+	HostID       string             `json:"hostId,omitempty"`
 	Text         string             `json:"text,omitempty"`
 	Count        int                `json:"count,omitempty"`
 }
@@ -93,7 +95,10 @@ func (s *Server) query(ctx context.Context, _ *mcp.CallToolRequest, in QueryInpu
 		if in.Type != "" && n.Type != in.Type || in.Lifecycle != "" && n.Lifecycle != in.Lifecycle || in.Certainty != "" && n.Certainty != in.Certainty || in.EvidenceKind != "" && n.EvidenceKind != in.EvidenceKind {
 			continue
 		}
-		if needle != "" && !strings.Contains(strings.ToLower(n.Name), needle) && !strings.Contains(strings.ToLower(n.ID), needle) {
+		if in.HostID != "" && !hostedBy(g, n.ID, in.HostID) {
+			continue
+		}
+		if needle != "" && !matchesNodeText(n, needle) {
 			continue
 		}
 		out.Items = append(out.Items, NodeSummary{ID: n.ID, Type: n.Type, Name: n.Name, Lifecycle: n.Lifecycle, Source: n.Source, EvidenceKind: n.EvidenceKind, Certainty: n.Certainty})
@@ -103,6 +108,50 @@ func (s *Server) query(ctx context.Context, _ *mcp.CallToolRequest, in QueryInpu
 	}
 	out.Count = len(out.Items)
 	return nil, out, nil
+}
+
+func hostedBy(g *graph.Graph, nodeID, hostID string) bool {
+	if _, ok := g.Node(hostID); !ok {
+		return false
+	}
+	for _, r := range g.Relations() {
+		if r.Predicate == graph.Hosts && r.From == hostID && r.To == nodeID {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesNodeText(n graph.Node, needle string) bool {
+	contains := func(value string) bool { return strings.Contains(strings.ToLower(value), needle) }
+	if contains(n.ID) || contains(n.Name) || contains(n.EvidenceRef) || contains(n.EvidenceReference) {
+		return true
+	}
+	if n.Machine != nil && (contains(n.Machine.Hostname) || contains(n.Machine.OS)) {
+		return true
+	}
+	if n.Hardware != nil && (contains(n.Hardware.Category) || contains(n.Hardware.Model) || contains(n.Hardware.Location)) {
+		return true
+	}
+	if n.SoftwareProject != nil && (contains(n.SoftwareProject.Purpose) || contains(n.SoftwareProject.RemoteRepository)) {
+		return true
+	}
+	if n.SoftwareInstance != nil {
+		if contains(n.SoftwareInstance.ProductName) || contains(n.SoftwareInstance.DeploymentPath) {
+			return true
+		}
+		for _, domain := range n.SoftwareInstance.Domains {
+			if contains(domain) {
+				return true
+			}
+		}
+		for _, port := range n.SoftwareInstance.Ports {
+			if contains(strconv.Itoa(port)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type EntityInput struct {

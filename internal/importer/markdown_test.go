@@ -11,7 +11,7 @@ import (
 )
 
 func markdownConfig() MarkdownConfig {
-	return MarkdownConfig{Source: "wiki:private-test", TypeMappings: map[string]graph.NodeType{"hardware": graph.Hardware, "vm": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "service": graph.SoftwareInstance}, MachineKindMappings: map[string]string{"vm": "virtual", "shared": "shared"}}
+	return MarkdownConfig{Source: "wiki:private-test", TypeMappings: map[string]graph.NodeType{"hardware": graph.Hardware, "vm": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "service": graph.SoftwareInstance, "product": graph.Product, "task": graph.WorkItem, "runbook": graph.Runbook, "software_project": graph.SoftwareProject, "document": graph.Document, "network": graph.Network, "credential": graph.AccountCredential}, MachineKindMappings: map[string]string{"vm": "virtual", "shared": "shared"}}
 }
 
 func assertionPresent(assertions []graph.FieldAssertion, nodeID, fieldPath string) bool {
@@ -50,7 +50,7 @@ func TestMarkdownFrontmatterCreatesSafeRepeatableCompleteBatch(t *testing.T) {
 		t.Fatalf("machine fields lost: %+v", vm)
 	}
 	shared := nodes["machine/shared.md"]
-	if shared.Machine.MachineKind != "shared" || len(shared.Machine.OperationConstraints) != 2 {
+	if shared.Machine.MachineKind != "shared" || len(shared.Machine.OperationConstraints) != 2 || len(shared.Machine.Owned) != 2 || shared.Machine.Owned[0] != "application deployments" {
 		t.Fatalf("shared machine constraints lost: %+v", shared.Machine)
 	}
 	candidate := nodes["notes/README.md"]
@@ -78,9 +78,53 @@ func TestMarkdownFrontmatterCreatesSafeRepeatableCompleteBatch(t *testing.T) {
 	if !assertionPresent(a.Batch.Assertions, "machine/example-vm.md", "lifecycle") {
 		t.Fatal("frontmatter status must create a lifecycle field assertion")
 	}
+	if !assertionPresent(a.Batch.Assertions, "machine/shared.md", "machine.owned") {
+		t.Fatal("shared-machine owned field must create typed evidence")
+	}
 	for _, as := range a.Batch.Assertions {
 		if as.EvidenceKind != graph.EvidenceDocument || as.Reference == "" {
 			t.Fatalf("assertion provenance missing: %+v", as)
+		}
+	}
+}
+
+func TestMarkdownRigRetainsDistinctMachineKind(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "rig.md"), []byte("---\ntype: rig\nname: Synthetic rig\nhostname: rig.example.test\n---\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 || report.Batch.Nodes[0].Machine == nil || report.Batch.Nodes[0].Machine.MachineKind != "rig" {
+		t.Fatalf("rig should retain a distinct machine kind: %+v", report.Batch.Nodes)
+	}
+	if !assertionPresent(report.Batch.Assertions, "rig.md", "machine.machineKind") {
+		t.Fatal("rig machine kind should have typed evidence")
+	}
+}
+
+func TestMarkdownHardwareImportsLocationAndTypedEvidence(t *testing.T) {
+	root := t.TempDir()
+	content := "---\ntype: hardware\nname: Synthetic host\ncategory: server\nmodel: Example Model\nlocation: lab-rack-2\nstatus: active\n---\nbody ignored\n"
+	if err := os.WriteFile(filepath.Join(root, "host.md"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 {
+		t.Fatalf("expected one imported hardware node: %+v", report)
+	}
+	node := report.Batch.Nodes[0]
+	if node.Hardware == nil || node.Hardware.Location != "lab-rack-2" || node.Hardware.Category != "server" || node.Hardware.Model != "Example Model" {
+		t.Fatalf("hardware frontmatter fields lost: %+v", node.Hardware)
+	}
+	for _, field := range []string{"hardware.location", "hardware.category", "hardware.model", "hardware.status"} {
+		if !assertionPresent(report.Batch.Assertions, node.ID, field) {
+			t.Errorf("expected typed evidence for %s", field)
 		}
 	}
 }
@@ -94,6 +138,7 @@ deploy_path: /srv/example
 domains:
   - one.example.test
   - two.example.test
+ports: [80, 443]
 api_token: TOPSECRET-SYNTHETIC
 ---
 Body ignored
@@ -106,12 +151,33 @@ Body ignored
 		t.Fatal(err)
 	}
 	node := report.Batch.Nodes[0]
-	if node.SoftwareInstance == nil || node.SoftwareInstance.DeploymentPath != "/srv/example" || len(node.SoftwareInstance.Domains) != 2 || node.SoftwareInstance.Domains[1] != "two.example.test" {
+	if node.SoftwareInstance == nil || node.SoftwareInstance.DeploymentPath != "/srv/example" || len(node.SoftwareInstance.Domains) != 2 || node.SoftwareInstance.Domains[1] != "two.example.test" || len(node.SoftwareInstance.Ports) != 2 || node.SoftwareInstance.Ports[1] != 443 {
 		t.Fatalf("list field did not retain type/values: %+v", node.SoftwareInstance)
+	}
+	if !assertionPresent(report.Batch.Assertions, node.ID, "softwareInstance.ports") {
+		t.Fatal("service ports did not produce typed field evidence")
 	}
 	raw, _ := json.Marshal(report)
 	if strings.Contains(string(raw), "TOPSECRET-SYNTHETIC") {
 		t.Fatal("credential value escaped exclusion")
+	}
+}
+
+func TestMarkdownInvalidServicePortsAreExcluded(t *testing.T) {
+	root := t.TempDir()
+	content := "---\ntype: service\nname: Invalid service\nports: [80, 70000]\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "service.md"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 0 {
+		t.Fatalf("record with invalid ports must be excluded: %+v", report.Batch.Nodes)
+	}
+	if len(report.Exclusions) != 1 || !strings.Contains(report.Exclusions[0].Reason, "invalid service ports") {
+		t.Fatalf("invalid ports need an actionable safe exclusion: %+v", report.Exclusions)
 	}
 }
 
@@ -162,6 +228,103 @@ func TestMarkdownFrontmatterRejectsInsecureConfigAndDoesNotApplyPartialScan(t *t
 	}
 }
 
+func TestMarkdownProductInstancesAndTaskRelatedReferencesBecomeTypedRelations(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"product/app.md": "---\ntype: product\nname: App\ninstances: ../service/app.md\n---\n",
+		"service/app.md": "---\ntype: service\nname: App service\n---\n",
+		"task/setup.md":  "---\ntype: task\nname: Setup task\nrelated: ../service/app.md\n---\n",
+		"runbook/app.md": "---\ntype: runbook\nname: App runbook\nscope: production service\ntrigger: service outage\n---\n",
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[graph.Predicate]bool{}
+	for _, relation := range report.Batch.Relations {
+		found[relation.Predicate] = true
+	}
+	if !found[graph.HasInstance] || !found[graph.RelatedTo] || len(report.Batch.Relations) != 2 {
+		t.Fatalf("expected typed product-instance and task-related references, got %+v", report.Batch.Relations)
+	}
+	var runbook graph.Node
+	foundRunbook := false
+	for _, node := range report.Batch.Nodes {
+		if node.Type == graph.Runbook {
+			runbook = node
+			foundRunbook = true
+			break
+		}
+	}
+	if !foundRunbook || runbook.Runbook == nil || runbook.Runbook.Scope != "production service" || !assertionPresent(report.Batch.Assertions, runbook.ID, "runbook.scope") {
+		t.Fatalf("runbook scope should map with typed evidence: %+v", runbook)
+	}
+	g := graph.New()
+	for _, node := range report.Batch.Nodes {
+		if err := g.AddNode(node); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, relation := range report.Batch.Relations {
+		if err := g.AddRelation(relation); err != nil {
+			t.Fatalf("imported typed reference rejected by graph model: %+v: %v", relation, err)
+		}
+	}
+}
+
+func TestMarkdownImportsRemainingModeledFrontmatterWithoutSecretValues(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"project/app.md":      "---\ntype: software_project\nname: App source\npurpose: synthetic app\nlanguages: [Go, TypeScript]\nremote_repository: https://example.invalid/app.git\n---\n",
+		"document/ops.md":     "---\ntype: document\nname: Operations reference\nrole: runbook-reference\nauthoritative_reference: private://ops\neffective: true\n---\n",
+		"network/lab.md":      "---\ntype: network\nname: Synthetic lab\nkind: private\ncidrs: [192.0.2.0/24]\naccess_locations: [local-console]\n---\n",
+		"credential/admin.md": "---\ntype: credential\nname: Admin access pointer\naccount: synthetic-admin\ncredential_type: ssh-key\npurpose: maintenance\nscope: lab\naccess_reference: private://vault/item\npassword: SHOULD_NEVER_IMPORT\n---\n",
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := map[graph.NodeType]graph.Node{}
+	for _, node := range report.Batch.Nodes {
+		nodes[node.Type] = node
+	}
+	if nodes[graph.SoftwareProject].SoftwareProject == nil || len(nodes[graph.SoftwareProject].SoftwareProject.Languages) != 2 {
+		t.Fatalf("software project fields missing: %+v", nodes[graph.SoftwareProject])
+	}
+	if nodes[graph.Document].Document == nil || !nodes[graph.Document].Document.Effective {
+		t.Fatalf("document frontmatter fields missing: %+v", nodes[graph.Document])
+	}
+	if nodes[graph.Network].Network == nil || len(nodes[graph.Network].Network.CIDRs) != 1 {
+		t.Fatalf("network fields missing: %+v", nodes[graph.Network])
+	}
+	credential := nodes[graph.AccountCredential].AccountCredential
+	if credential == nil || credential.AccessReference != "private://vault/item" || credential.Account != "synthetic-admin" {
+		t.Fatalf("safe credential pointers missing: %+v", credential)
+	}
+	raw, _ := json.Marshal(report)
+	if strings.Contains(string(raw), "SHOULD_NEVER_IMPORT") {
+		t.Fatal("secret value leaked into Markdown batch")
+	}
+	if !assertionPresent(report.Batch.Assertions, "network/lab.md", "network.cidrs") || !assertionPresent(report.Batch.Assertions, "document/ops.md", "document.effective") {
+		t.Fatal("typed field assertions missing")
+	}
+}
 func TestMarkdownBatchAppliesIdempotentlyAndExplicitRenameMappingPreservesIdentity(t *testing.T) {
 	root := t.TempDir()
 	write := func(name, content string) {

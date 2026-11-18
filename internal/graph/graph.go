@@ -79,6 +79,8 @@ const (
 	Targets          Predicate = "targets"
 	Supersedes       Predicate = "supersedes"
 	DependsOn        Predicate = "dependsOn"
+	HasInstance      Predicate = "hasInstance"
+	RelatedTo        Predicate = "relatedTo"
 )
 
 type Relation struct {
@@ -221,8 +223,10 @@ func validEndpoints(p Predicate, a, b NodeType) bool {
 		return a == WorkItem && b != Self
 	case Supersedes:
 		return a == b && a != Self
-	case DependsOn:
+	case DependsOn, RelatedTo:
 		return a != Self && b != Self
+	case HasInstance:
+		return a == Product && b == SoftwareInstance
 	default:
 		return false
 	}

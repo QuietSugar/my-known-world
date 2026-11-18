@@ -26,6 +26,7 @@ type ResourceClaim struct {
 }
 type MachineDetails struct {
 	MachineKind            string          `json:"machineKind,omitempty"`
+	Owned                  []string        `json:"owned,omitempty"`
 	Hostname               string          `json:"hostname,omitempty"`
 	OS                     string          `json:"os,omitempty"`
 	IPs                    []string        `json:"ips,omitempty"`
@@ -58,6 +59,7 @@ type Endpoint struct {
 type SoftwareInstanceDetails struct {
 	ProductName             string     `json:"productName,omitempty"`
 	Domains                 []string   `json:"domains,omitempty"`
+	Ports                   []int      `json:"ports,omitempty"`
 	DeploymentPath          string     `json:"deploymentPath,omitempty"`
 	DeploymentMethod        string     `json:"deploymentMethod,omitempty"`
 	RuntimeIdentity         string     `json:"runtimeIdentity,omitempty"`
@@ -92,6 +94,7 @@ type DocumentDetails struct {
 	SupersededBy           string     `json:"supersededBy,omitempty"`
 }
 type RunbookDetails struct {
+	Scope                  string     `json:"scope,omitempty"`
 	Trigger                string     `json:"trigger,omitempty"`
 	Preconditions          []string   `json:"preconditions,omitempty"`
 	StepsReference         string     `json:"stepsReference,omitempty"`
@@ -213,8 +216,8 @@ func (n Node) ValidateModelDetails() error {
 	if !valid {
 		return fmt.Errorf("type-specific details do not match node type %s", n.Type)
 	}
-	if n.Machine != nil && n.Machine.MachineKind != "" && n.Machine.MachineKind != "physical" && n.Machine.MachineKind != "virtual" && n.Machine.MachineKind != "shared" {
-		return errors.New("machine kind must be physical, virtual, or shared")
+	if n.Machine != nil && n.Machine.MachineKind != "" && n.Machine.MachineKind != "physical" && n.Machine.MachineKind != "virtual" && n.Machine.MachineKind != "shared" && n.Machine.MachineKind != "rig" {
+		return errors.New("machine kind must be physical, virtual, shared, or rig")
 	}
 	if err := validateSafeRef(n.EvidenceReference); err != nil {
 		return err
@@ -275,6 +278,11 @@ func (n Node) ValidateModelDetails() error {
 		}
 	}
 	if n.SoftwareInstance != nil {
+		for _, port := range n.SoftwareInstance.Ports {
+			if port < 1 || port > 65535 {
+				return errors.New("invalid software instance port")
+			}
+		}
 		for _, e := range n.SoftwareInstance.Endpoints {
 			if e.Kind == "" || e.Address == "" || e.Port < 0 || e.Port > 65535 {
 				return errors.New("invalid software instance endpoint")

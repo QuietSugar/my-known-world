@@ -12,7 +12,7 @@ func TestSyntheticWorldCoversCurrentModelAndSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantTypes := map[graph.NodeType]bool{graph.Self: true, graph.Hardware: true, graph.Machine: true, graph.SoftwareProject: true, graph.SoftwareInstance: true, graph.RunningPeriod: true, graph.AccountCredential: true, graph.Product: true, graph.Document: true, graph.Runbook: true, graph.WorkItem: true, graph.Network: true, graph.ProvisionalObject: true}
-	wantPredicates := map[graph.Predicate]bool{graph.Owns: true, graph.Maintains: true, graph.KnowsAbout: true, graph.Uses: true, graph.CanOperate: true, graph.RoutesThrough: true, graph.ProvidesAccessTo: true, graph.Hosts: true, graph.ImplementedFrom: true, graph.HasRunningPeriod: true, graph.HasCredential: true, graph.Documents: true, graph.AppliesTo: true, graph.Targets: true, graph.Supersedes: true, graph.DependsOn: true}
+	wantPredicates := map[graph.Predicate]bool{graph.Owns: true, graph.Maintains: true, graph.KnowsAbout: true, graph.Uses: true, graph.CanOperate: true, graph.RoutesThrough: true, graph.ProvidesAccessTo: true, graph.Hosts: true, graph.ImplementedFrom: true, graph.HasRunningPeriod: true, graph.HasCredential: true, graph.Documents: true, graph.AppliesTo: true, graph.Targets: true, graph.Supersedes: true, graph.DependsOn: true, graph.HasInstance: true, graph.RelatedTo: true}
 	seenTypes := map[graph.NodeType]bool{}
 	seenPredicates := map[graph.Predicate]bool{}
 	for _, n := range batch.Nodes {

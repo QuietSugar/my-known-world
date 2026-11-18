@@ -18,11 +18,11 @@ services:
     networks: [backend]
 
   app:
-    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.0.5}
+    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.0.6}
     build:
       context: .
       args:
-        VERSION: ${IMAGE_VERSION:-0.0.5}
+        VERSION: ${IMAGE_VERSION:-0.0.6}
     environment:
       ADDR: :8080
       WEB_ROOT: /app/web
