@@ -32,7 +32,12 @@ jobs:
           go-version: stable
           cache: true
       - name: Format check
-        run: test -z "$(gofmt -l $(find . -name '*.go' -not -path './.git/*'))"
+        run: |
+          unformatted="$(gofmt -l $(find . -name '*.go' -not -path './.git/*'))"
+          if [ -n "$unformatted" ]; then
+            while IFS= read -r file; do echo "::error file=$file::Run gofmt -w $file"; done <<< "$unformatted"
+            exit 1
+          fi
       - name: Vet
         run: go vet ./...
       - name: Race-enabled tests
