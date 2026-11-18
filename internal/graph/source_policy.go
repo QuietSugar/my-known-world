@@ -38,7 +38,7 @@ func (p SourcePolicy) Validate() error {
 		types[v] = true
 	}
 	predicates := map[Predicate]bool{}
-	validPredicates := map[Predicate]bool{Owns: true, Maintains: true, KnowsAbout: true, Uses: true, CanOperate: true, RoutesThrough: true, ProvidesAccessTo: true, Hosts: true, ImplementedFrom: true, HasRunningPeriod: true, HasCredential: true, Documents: true, AppliesTo: true, Targets: true, Supersedes: true, DependsOn: true}
+	validPredicates := map[Predicate]bool{Owns: true, Maintains: true, KnowsAbout: true, Uses: true, CanOperate: true, RoutesThrough: true, ProvidesAccessTo: true, Hosts: true, ImplementedFrom: true, HasRunningPeriod: true, HasCredential: true, Documents: true, AppliesTo: true, Targets: true, Supersedes: true, DependsOn: true, HasInstance: true, RelatedTo: true}
 	for _, v := range p.AllowedPredicates {
 		if !validPredicates[v] {
 			return fmt.Errorf("unknown allowed predicate %q", v)

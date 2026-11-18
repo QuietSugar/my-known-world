@@ -544,6 +544,24 @@
       "from": "network-home",
       "predicate": "routesThrough",
       "to": "network-vpn"
+    },
+    {
+      "id": "product-has-instance",
+      "from": "product-suite",
+      "predicate": "hasInstance",
+      "to": "instance-app",
+      "source": "synthetic test fixture",
+      "evidenceKind": "document",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "work-related-instance",
+      "from": "work-replacement",
+      "predicate": "relatedTo",
+      "to": "instance-app",
+      "source": "synthetic test fixture",
+      "evidenceKind": "manual",
+      "certainty": "confirmed"
     }
   ],
   "assertions": [

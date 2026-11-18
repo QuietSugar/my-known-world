@@ -94,6 +94,7 @@ type DocumentDetails struct {
 	SupersededBy           string     `json:"supersededBy,omitempty"`
 }
 type RunbookDetails struct {
+	Scope                  string     `json:"scope,omitempty"`
 	Trigger                string     `json:"trigger,omitempty"`
 	Preconditions          []string   `json:"preconditions,omitempty"`
 	StepsReference         string     `json:"stepsReference,omitempty"`

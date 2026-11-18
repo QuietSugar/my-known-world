@@ -11,7 +11,7 @@ import (
 )
 
 func markdownConfig() MarkdownConfig {
-	return MarkdownConfig{Source: "wiki:private-test", TypeMappings: map[string]graph.NodeType{"hardware": graph.Hardware, "vm": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "service": graph.SoftwareInstance}, MachineKindMappings: map[string]string{"vm": "virtual", "shared": "shared"}}
+	return MarkdownConfig{Source: "wiki:private-test", TypeMappings: map[string]graph.NodeType{"hardware": graph.Hardware, "vm": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "service": graph.SoftwareInstance, "product": graph.Product, "task": graph.WorkItem, "runbook": graph.Runbook}, MachineKindMappings: map[string]string{"vm": "virtual", "shared": "shared"}}
 }
 
 func assertionPresent(assertions []graph.FieldAssertion, nodeID, fieldPath string) bool {
@@ -173,8 +173,8 @@ func TestMarkdownInvalidServicePortsAreExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Batch.Nodes) != 1 || len(report.Batch.Nodes[0].SoftwareInstance.Ports) != 0 {
-		t.Fatalf("invalid ports must not enter the typed graph: %+v", report.Batch.Nodes)
+	if len(report.Batch.Nodes) != 0 {
+		t.Fatalf("record with invalid ports must be excluded: %+v", report.Batch.Nodes)
 	}
 	if len(report.Exclusions) != 1 || !strings.Contains(report.Exclusions[0].Reason, "invalid service ports") {
 		t.Fatalf("invalid ports need an actionable safe exclusion: %+v", report.Exclusions)
@@ -225,6 +225,57 @@ func TestMarkdownFrontmatterRejectsInsecureConfigAndDoesNotApplyPartialScan(t *t
 	}
 	if _, err := MarkdownFrontmatter(root, cfg); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMarkdownProductInstancesAndTaskRelatedReferencesBecomeTypedRelations(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"product/app.md": "---\ntype: product\nname: App\ninstances: ../service/app.md\n---\n",
+		"service/app.md": "---\ntype: service\nname: App service\n---\n",
+		"task/setup.md": "---\ntype: task\nname: Setup task\nrelated: ../service/app.md\n---\n",
+		"runbook/app.md": "---\ntype: runbook\nname: App runbook\nscope: production service\ntrigger: service outage\n---\n",
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[graph.Predicate]bool{}
+	for _, relation := range report.Batch.Relations {
+		found[relation.Predicate] = true
+	}
+	if !found[graph.HasInstance] || !found[graph.RelatedTo] || len(report.Batch.Relations) != 2 {
+		t.Fatalf("expected typed product-instance and task-related references, got %+v", report.Batch.Relations)
+	}
+	runbook, ok := func() (graph.Node, bool) {
+	for _, node := range report.Batch.Nodes {
+		if node.Type == graph.Runbook {
+			return node, true
+		}
+	}
+	return graph.Node{}, false
+	}()
+	if !ok || runbook.Runbook == nil || runbook.Runbook.Scope != "production service" || !assertionPresent(report.Batch.Assertions, runbook.ID, "runbook.scope") {
+		t.Fatalf("runbook scope should map with typed evidence: %+v", runbook)
+	}
+	g := graph.New()
+	for _, node := range report.Batch.Nodes {
+		if err := g.AddNode(node); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, relation := range report.Batch.Relations {
+		if err := g.AddRelation(relation); err != nil {
+			t.Fatalf("imported typed reference rejected by graph model: %+v: %v", relation, err)
+		}
 	}
 }
 

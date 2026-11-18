@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Network } from 'lucide-react'
 import { api, type Exploration, type Node, type NodeType } from './api'
 
-const predicates = ['owns', 'maintains', 'knowsAbout', 'uses', 'canOperate', 'routesThrough', 'providesAccessTo', 'hosts', 'implementedFrom', 'hasRunningPeriod', 'hasCredential', 'documents', 'appliesTo', 'targets', 'supersedes', 'dependsOn']
+const predicates = ['owns', 'maintains', 'knowsAbout', 'uses', 'canOperate', 'routesThrough', 'providesAccessTo', 'hosts', 'implementedFrom', 'hasRunningPeriod', 'hasCredential', 'documents', 'appliesTo', 'targets', 'supersedes', 'dependsOn', 'hasInstance', 'relatedTo']
 const typeLabels: Record<NodeType, string> = { Self: 'Self', Hardware: '硬件', Machine: '机器', SoftwareProject: '软件项目', SoftwareInstance: '部署实例', RunningPeriod: '运行周期', AccountCredential: '凭据元信息', Product: '产品', Document: '文档', Runbook: 'Runbook', WorkItem: '工作事项', Network:'网络', ProvisionalObject: '待分类' }
 
 export function GraphExplorer({ nodes, onSelect }: { nodes: Node[]; onSelect: (node: Node) => void }) {

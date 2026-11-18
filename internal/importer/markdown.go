@@ -179,6 +179,10 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 				continue
 			}
 		}
+		if reason := invalidMarkdownFieldReason(f.data); reason != "" {
+			report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: reason})
+			continue
+		}
 		collectSecretExclusions(f.rel, f.data, patterns, &report.Exclusions)
 		typeValue, _ := stringValue(f.data["type"])
 		target, hasMapping := cfgMap[strings.ToLower(strings.TrimSpace(typeValue))]
@@ -216,6 +220,9 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: ex})
 				}
 			}
+			if target == graph.Runbook {
+				node.Runbook = &graph.RunbookDetails{Scope: firstString(f.data, "scope"), Trigger: firstString(f.data, "trigger")}
+			}
 			for _, field := range mappedFields(node, f.data) {
 				raw, e := json.Marshal(field.value)
 				if e != nil {
@@ -251,11 +258,52 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter host reference has incompatible mapped types"})
 					continue
 				}
-				rid := relationID(canonicalSourceID(parent.ID, cfg.IdentityMappings), canonicalSourceID(child.ID, cfg.IdentityMappings))
+				rid := relationID(canonicalSourceID(parent.ID, cfg.IdentityMappings), graph.Hosts, canonicalSourceID(child.ID, cfg.IdentityMappings))
 				if !relationSeen[rid] {
 					relationSeen[rid] = true
 					report.Batch.Relations = append(report.Batch.Relations, graph.Relation{ID: rid, From: parent.ID, Predicate: graph.Hosts, To: child.ID, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
 				}
+			}
+		}
+	}
+	for _, f := range files {
+		node, ok := mapped[f.rel]
+		if !ok {
+			continue
+		}
+		for _, refSpec := range []struct {
+			key       string
+			predicate graph.Predicate
+		}{{"instances", graph.HasInstance}, {"related", graph.RelatedTo}} {
+			key, predicate := refSpec.key, refSpec.predicate
+			if key == "instances" && node.Type != graph.Product || key == "related" && node.Type != graph.WorkItem {
+				continue
+			}
+			for _, rawRef := range stringList(f.data[key]) {
+				targetPath, valid := safeReference(f.rel, rawRef, filePaths)
+				if !valid || !filePaths[targetPath] {
+					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter " + key + " reference is invalid or missing"})
+					continue
+				}
+				target, exists := mapped[targetPath]
+				if !exists {
+					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter " + key + " reference target is not a mapped valid entity"})
+					continue
+				}
+				if predicate == graph.HasInstance && target.Type != graph.SoftwareInstance {
+					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "product instances reference must target a mapped service"})
+					continue
+				}
+				fromID, toID := node.ID, target.ID
+				if predicate == graph.RelatedTo {
+					fromID, toID = node.ID, target.ID
+				}
+				rid := relationID(canonicalSourceID(fromID, cfg.IdentityMappings), predicate, canonicalSourceID(toID, cfg.IdentityMappings))
+				if relationSeen[rid] {
+					continue
+				}
+				relationSeen[rid] = true
+				report.Batch.Relations = append(report.Batch.Relations, graph.Relation{ID: rid, From: fromID, Predicate: predicate, To: toID, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
 			}
 		}
 	}
@@ -301,6 +349,48 @@ func readFrontmatter(file string) ([]byte, bool, int, error) {
 	}
 	return nil, false, line, nil
 }
+func invalidMarkdownFieldReason(m map[string]any) string {
+	stringFields := []string{"type", "id", "name", "title", "status", "hostname", "os", "location", "category", "model", "scope", "trigger", "deploy_path", "deployment_path"}
+	for _, key := range stringFields {
+		if value, exists := m[key]; exists {
+			if _, ok := value.(string); !ok {
+				return "invalid frontmatter field type; record excluded"
+			}
+		}
+	}
+	listFields := []string{"ip", "ips", "constraints", "allowed_operations", "forbidden_operations", "owned", "domains", "domain", "parent", "host", "instances", "related"}
+	for _, key := range listFields {
+		if value, exists := m[key]; exists && !isStringOrStringList(value) {
+			return "invalid frontmatter field type; record excluded"
+		}
+	}
+	if value, exists := m["ports"]; exists {
+		if _, ok := portList(value); !ok {
+			return "invalid service ports; expected integers from 1 through 65535; record excluded"
+		}
+	}
+	return ""
+}
+
+func isStringOrStringList(value any) bool {
+	if _, ok := value.(string); ok {
+		return true
+	}
+	values, ok := value.([]any)
+	if !ok {
+		values, ok = value.([]string)
+		if !ok {
+			return false
+		}
+	}
+	for _, value := range values {
+		if _, ok := value.(string); !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func normalizeMap(in map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range in {
@@ -470,6 +560,14 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 			add("machine.forbiddenOperations", append([]string{}, d.ForbiddenOperations...))
 		}
 	}
+	if d := n.Runbook; d != nil {
+		if d.Scope != "" {
+			add("runbook.scope", d.Scope)
+		}
+		if d.Trigger != "" {
+			add("runbook.trigger", d.Trigger)
+		}
+	}
 	if d := n.SoftwareInstance; d != nil {
 		if d.DeploymentPath != "" {
 			add("softwareInstance.deploymentPath", d.DeploymentPath)
@@ -552,7 +650,7 @@ func assertionID(sourcePath, field string) string {
 	sum := sha256.Sum256([]byte(sourcePath + "\x00" + field))
 	return "md-" + hex.EncodeToString(sum[:16])
 }
-func relationID(from, to string) string {
-	sum := sha256.Sum256([]byte(from + "\x00hosts\x00" + to))
+func relationID(from string, predicate graph.Predicate, to string) string {
+	sum := sha256.Sum256([]byte(from + "\x00" + string(predicate) + "\x00" + to))
 	return "md-rel-" + hex.EncodeToString(sum[:16])
 }
