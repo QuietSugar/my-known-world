@@ -379,19 +379,16 @@ func isStringOrStringList(value any) bool {
 	if _, ok := value.(string); ok {
 		return true
 	}
-	values, ok := value.([]any)
-	if !ok {
-		values, ok = value.([]string)
-		if !ok {
-			return false
+	if values, ok := value.([]any); ok {
+		for _, value := range values {
+			if _, ok := value.(string); !ok {
+				return false
+			}
 		}
+		return true
 	}
-	for _, value := range values {
-		if _, ok := value.(string); !ok {
-			return false
-		}
-	}
-	return true
+	_, ok := value.([]string)
+	return ok
 }
 
 func normalizeMap(in map[string]any) map[string]any {
