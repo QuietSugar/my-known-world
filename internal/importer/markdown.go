@@ -386,18 +386,6 @@ func invalidMarkdownFieldReason(m map[string]any) string {
 			return "invalid frontmatter field type; record excluded"
 		}
 	}
-	if _, hasIP := m["ip"]; hasIP {
-		if _, hasIPs := m["ips"]; hasIPs {
-			return "both ip and ips are present; record excluded as ambiguous"
-		}
-	}
-	for _, key := range []string{"ip", "ips"} {
-		for _, raw := range stringList(m[key]) {
-			if net.ParseIP(raw) == nil {
-				return "invalid machine IP address; record excluded"
-			}
-		}
-	}
 	for _, raw := range stringList(m["cidrs"]) {
 		if _, _, err := net.ParseCIDR(raw); err != nil {
 			return "invalid network CIDR; record excluded"
