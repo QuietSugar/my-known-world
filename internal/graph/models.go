@@ -26,6 +26,7 @@ type ResourceClaim struct {
 }
 type MachineDetails struct {
 	MachineKind            string          `json:"machineKind,omitempty"`
+	Owned                  []string        `json:"owned,omitempty"`
 	Hostname               string          `json:"hostname,omitempty"`
 	OS                     string          `json:"os,omitempty"`
 	IPs                    []string        `json:"ips,omitempty"`
@@ -213,8 +214,8 @@ func (n Node) ValidateModelDetails() error {
 	if !valid {
 		return fmt.Errorf("type-specific details do not match node type %s", n.Type)
 	}
-	if n.Machine != nil && n.Machine.MachineKind != "" && n.Machine.MachineKind != "physical" && n.Machine.MachineKind != "virtual" && n.Machine.MachineKind != "shared" {
-		return errors.New("machine kind must be physical, virtual, or shared")
+	if n.Machine != nil && n.Machine.MachineKind != "" && n.Machine.MachineKind != "physical" && n.Machine.MachineKind != "virtual" && n.Machine.MachineKind != "shared" && n.Machine.MachineKind != "rig" {
+		return errors.New("machine kind must be physical, virtual, shared, or rig")
 	}
 	if err := validateSafeRef(n.EvidenceReference); err != nil {
 		return err

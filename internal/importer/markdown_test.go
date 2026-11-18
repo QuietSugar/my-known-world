@@ -50,7 +50,7 @@ func TestMarkdownFrontmatterCreatesSafeRepeatableCompleteBatch(t *testing.T) {
 		t.Fatalf("machine fields lost: %+v", vm)
 	}
 	shared := nodes["machine/shared.md"]
-	if shared.Machine.MachineKind != "shared" || len(shared.Machine.OperationConstraints) != 2 {
+	if shared.Machine.MachineKind != "shared" || len(shared.Machine.OperationConstraints) != 2 || len(shared.Machine.Owned) != 2 || shared.Machine.Owned[0] != "application deployments" {
 		t.Fatalf("shared machine constraints lost: %+v", shared.Machine)
 	}
 	candidate := nodes["notes/README.md"]
@@ -78,10 +78,30 @@ func TestMarkdownFrontmatterCreatesSafeRepeatableCompleteBatch(t *testing.T) {
 	if !assertionPresent(a.Batch.Assertions, "machine/example-vm.md", "lifecycle") {
 		t.Fatal("frontmatter status must create a lifecycle field assertion")
 	}
+	if !assertionPresent(a.Batch.Assertions, "machine/shared.md", "machine.owned") {
+		t.Fatal("shared-machine owned field must create typed evidence")
+	}
 	for _, as := range a.Batch.Assertions {
 		if as.EvidenceKind != graph.EvidenceDocument || as.Reference == "" {
 			t.Fatalf("assertion provenance missing: %+v", as)
 		}
+	}
+}
+
+func TestMarkdownRigRetainsDistinctMachineKind(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "rig.md"), []byte("---\ntype: rig\nname: Synthetic rig\nhostname: rig.example.test\n---\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 || report.Batch.Nodes[0].Machine == nil || report.Batch.Nodes[0].Machine.MachineKind != "rig" {
+		t.Fatalf("rig should retain a distinct machine kind: %+v", report.Batch.Nodes)
+	}
+	if !assertionPresent(report.Batch.Assertions, "rig.md", "machine.machineKind") {
+		t.Fatal("rig machine kind should have typed evidence")
 	}
 }
 

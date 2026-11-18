@@ -23,7 +23,7 @@ const detailConfig: Partial<Record<NodeType, { key: string | null; fields: Field
     { key: 'specifications', label: '规格（JSON 对象）', kind: 'json', shape: 'object' }, { key: 'accessReference', label: '访问说明引用' }, { key: 'maintenanceReference', label: '维护说明引用' },
   ] },
   Machine: { key: 'machine', fields: [
-    { key: 'machineKind', label: '机器类别', hint: 'physical / virtual / shared' }, { key: 'hostname', label: '主机名' }, { key: 'os', label: '操作系统' }, { key: 'ips', label: 'IP 地址', kind: 'list' },
+    { key: 'machineKind', label: '机器类别', hint: 'physical / virtual / shared / rig' }, { key: 'hostname', label: '主机名' }, { key: 'os', label: '操作系统' }, { key: 'ips', label: 'IP 地址', kind: 'list' },
     { key: 'network', label: '网络' }, { key: 'status', label: '状态' }, { key: 'accessMethod', label: '访问方式' }, { key: 'accessPrerequisites', label: '访问前提', kind: 'list' },
     { key: 'allowedOperations', label: '允许操作', kind: 'list' }, { key: 'operationConstraints', label: '操作约束', kind: 'list' }, { key: 'forbiddenOperations', label: '禁止操作', kind: 'list' },
     { key: 'responsibilityBoundary', label: '责任边界' }, { key: 'resources', label: '资源声明（JSON 数组）', kind: 'json', shape: 'array' }, { key: 'lastVerified', label: '最近核验时间' },

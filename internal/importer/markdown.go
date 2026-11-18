@@ -105,7 +105,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 	kindMap := make(map[string]string, len(cfg.MachineKindMappings))
 	for k, v := range cfg.MachineKindMappings {
 		key, value := strings.ToLower(strings.TrimSpace(k)), strings.ToLower(strings.TrimSpace(v))
-		if cfgMap[key] != graph.Machine || (value != "physical" && value != "virtual" && value != "shared") {
+		if cfgMap[key] != graph.Machine || (value != "physical" && value != "virtual" && value != "shared" && value != "rig") {
 			return MarkdownReport{}, fmt.Errorf("invalid machineKindMappings entry for %q", k)
 		}
 		kindMap[key] = value
@@ -198,7 +198,11 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 				node.Hardware = &graph.HardwareDetails{Category: firstString(f.data, "category"), Model: firstString(f.data, "model"), Location: firstString(f.data, "location"), Status: firstString(f.data, "status")}
 			}
 			if target == graph.Machine {
-				details, ex := machineDetails(f.data, kindField, kindMap[strings.ToLower(strings.TrimSpace(typeValue))])
+				configuredKind := kindMap[strings.ToLower(strings.TrimSpace(typeValue))]
+				if configuredKind == "" && strings.EqualFold(strings.TrimSpace(typeValue), "rig") {
+					configuredKind = "rig"
+				}
+				details, ex := machineDetails(f.data, kindField, configuredKind)
 				node.Machine = details
 				if ex != "" {
 					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: ex})
@@ -207,7 +211,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			if target == graph.SoftwareInstance {
 				node.SoftwareInstance = instanceDetails(f.data)
 			}
-			for _, field := range mappedFields(node, f.data, kindField) {
+			for _, field := range mappedFields(node, f.data) {
 				raw, e := json.Marshal(field.value)
 				if e != nil {
 					continue
@@ -330,12 +334,12 @@ func stringList(v any) []string {
 	return nil
 }
 func machineDetails(m map[string]any, kindField, configuredKind string) (*graph.MachineDetails, string) {
-	d := &graph.MachineDetails{Hostname: firstString(m, "hostname"), OS: firstString(m, "os"), Status: firstString(m, "status"), MachineKind: configuredKind}
+	d := &graph.MachineDetails{Hostname: firstString(m, "hostname"), OS: firstString(m, "os"), Status: firstString(m, "status"), MachineKind: configuredKind, Owned: stringList(m["owned"])}
 	if v, ok := m[kindField]; ok {
 		d.MachineKind = strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
 	}
 	invalidKind := false
-	if d.MachineKind != "" && d.MachineKind != "physical" && d.MachineKind != "virtual" && d.MachineKind != "shared" {
+	if d.MachineKind != "" && d.MachineKind != "physical" && d.MachineKind != "virtual" && d.MachineKind != "shared" && d.MachineKind != "rig" {
 		d.MachineKind = ""
 		invalidKind = true
 	}
@@ -377,7 +381,7 @@ type markdownMappedField struct {
 	value any
 }
 
-func mappedFields(n graph.Node, m map[string]any, kindField string) []markdownMappedField {
+func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 	out := []markdownMappedField{}
 	add := func(field string, value any) {
 		if value != nil {
@@ -400,11 +404,14 @@ func mappedFields(n graph.Node, m map[string]any, kindField string) []markdownMa
 		addString("hostname", "machine.hostname")
 		addString("os", "machine.os")
 		addString("status", "machine.status")
-		if _, ok := m[kindField]; ok && d.MachineKind != "" {
+		if d.MachineKind != "" {
 			add("machine.machineKind", d.MachineKind)
 		}
 		if len(d.IPs) > 0 {
 			add("machine.ips", append([]string{}, d.IPs...))
+		}
+		if len(d.Owned) > 0 {
+			add("machine.owned", append([]string{}, d.Owned...))
 		}
 		if len(d.OperationConstraints) > 0 {
 			add("machine.operationConstraints", append([]string{}, d.OperationConstraints...))
