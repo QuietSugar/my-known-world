@@ -274,7 +274,10 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 		for _, refSpec := range []struct {
 			key       string
 			predicate graph.Predicate
-		}{{"instances", graph.HasInstance}, {"related", graph.RelatedTo}} {
+		}{
+			{"instances", graph.HasInstance},
+			{"related", graph.RelatedTo},
+		} {
 			key, predicate := refSpec.key, refSpec.predicate
 			if key == "instances" && node.Type != graph.Product || key == "related" && node.Type != graph.WorkItem {
 				continue
