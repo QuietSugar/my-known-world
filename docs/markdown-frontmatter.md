@@ -26,4 +26,4 @@ The output is intended for `POST /api/sync/preview` and for the existing explici
 
 ## Current limitations
 
-This is not a complete hall-mcp replacement. The adapter currently reads frontmatter only, supports a subset of typed fields and references, and does not import Markdown relative links or bodies. There is no automatic freshness monitoring, watcher, or sync-failure dashboard. PostgreSQL-backed graph data remains authoritative after import; these capabilities should be extended without making Markdown an implicit runtime dependency or authority.
+This adapter reads frontmatter only and does not import Markdown bodies or relative-link relationships. The database-backed application supports explicit batch preview/apply, guarded writes, graph/source history, review, and read-only MCP; it does not watch external Markdown or claim freshness against it. PostgreSQL remains authoritative after import. See the [database-authoritative deployment and cutover runbook](database-authoritative-cutover.md) for bootstrap, Agent/human cutover, backup/restore, upgrade, and rollback procedures.
