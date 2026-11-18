@@ -14,13 +14,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
 	yaml "github.com/goccy/go-yaml"
 )
 
-const MarkdownParserVersion = "markdown-frontmatter-v1"
+const MarkdownParserVersion = "markdown-frontmatter-v2"
 const maxFrontmatterBytes = 1 << 20
 
 var errFrontmatterTooLarge = errors.New("frontmatter exceeds size limit")
@@ -209,7 +210,11 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 				}
 			}
 			if target == graph.SoftwareInstance {
-				node.SoftwareInstance = instanceDetails(f.data)
+				details, ex := instanceDetails(f.data)
+				node.SoftwareInstance = details
+				if ex != "" {
+					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: ex})
+				}
 			}
 			for _, field := range mappedFields(node, f.data) {
 				raw, e := json.Marshal(field.value)
@@ -368,12 +373,54 @@ func machineDetails(m map[string]any, kindField, configuredKind string) (*graph.
 	}
 	return d, strings.Join(reasons, "; ")
 }
-func instanceDetails(m map[string]any) *graph.SoftwareInstanceDetails {
+func instanceDetails(m map[string]any) (*graph.SoftwareInstanceDetails, string) {
 	domains := m["domains"]
 	if _, hasPlural := m["domains"]; !hasPlural {
 		domains = m["domain"]
 	}
-	return &graph.SoftwareInstanceDetails{DeploymentPath: firstString(m, "deploy_path", "deployment_path"), Domains: stringList(domains), OperationalState: firstString(m, "status")}
+	d := &graph.SoftwareInstanceDetails{DeploymentPath: firstString(m, "deploy_path", "deployment_path"), Domains: stringList(domains), OperationalState: firstString(m, "status")}
+	if rawPorts, exists := m["ports"]; exists {
+		ports, ok := portList(rawPorts)
+		if !ok {
+			return d, "invalid service ports excluded; expected integer ports from 1 through 65535"
+		}
+		d.Ports = ports
+	}
+	return d, ""
+}
+
+func portList(value any) ([]int, bool) {
+	values, ok := value.([]any)
+	if !ok {
+		values = []any{value}
+	}
+	ports := make([]int, 0, len(values))
+	for _, value := range values {
+		port, valid := portNumber(value)
+		if !valid || port < 1 || port > 65535 {
+			return nil, false
+		}
+		ports = append(ports, port)
+	}
+	return ports, len(ports) > 0
+}
+
+func portNumber(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), int64(int(v)) == v
+	case uint64:
+		return int(v), uint64(int(v)) == v
+	case float64:
+		return int(v), float64(int(v)) == v
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		return n, err == nil
+	default:
+		return 0, false
+	}
 }
 
 type markdownMappedField struct {
@@ -429,6 +476,9 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 		}
 		if len(d.Domains) > 0 {
 			add("softwareInstance.domains", append([]string{}, d.Domains...))
+		}
+		if len(d.Ports) > 0 {
+			add("softwareInstance.ports", append([]int{}, d.Ports...))
 		}
 		if d.OperationalState != "" {
 			add("softwareInstance.operationalState", d.OperationalState)

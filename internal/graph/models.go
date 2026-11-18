@@ -59,6 +59,7 @@ type Endpoint struct {
 type SoftwareInstanceDetails struct {
 	ProductName             string     `json:"productName,omitempty"`
 	Domains                 []string   `json:"domains,omitempty"`
+	Ports                   []int      `json:"ports,omitempty"`
 	DeploymentPath          string     `json:"deploymentPath,omitempty"`
 	DeploymentMethod        string     `json:"deploymentMethod,omitempty"`
 	RuntimeIdentity         string     `json:"runtimeIdentity,omitempty"`
@@ -276,6 +277,11 @@ func (n Node) ValidateModelDetails() error {
 		}
 	}
 	if n.SoftwareInstance != nil {
+		for _, port := range n.SoftwareInstance.Ports {
+			if port < 1 || port > 65535 {
+				return errors.New("invalid software instance port")
+			}
+		}
 		for _, e := range n.SoftwareInstance.Endpoints {
 			if e.Kind == "" || e.Address == "" || e.Port < 0 || e.Port > 65535 {
 				return errors.New("invalid software instance endpoint")

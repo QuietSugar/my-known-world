@@ -4,7 +4,7 @@ MyKnownWorld exposes the official Go MCP SDK's **Streamable HTTP** transport at 
 
 Available tools:
 
-- `graph_query`: type, lifecycle, certainty, evidence-kind, hosting-machine ID, and case-insensitive text filters over safe modeled identifiers, names, hostnames, locations, domains, and source references; stable ID order, bounded count, and explicit empty arrays.
+- `graph_query`: type, lifecycle, certainty, evidence-kind, hosting-machine ID, and case-insensitive text filters over safe modeled identifiers, names, hostnames, locations, domains, ports, and source references; stable ID order, bounded count, and explicit empty arrays.
 - `graph_entity`: typed node details, direct relations, Self relation category/path, and assertion metadata with no value hashes.
 - `graph_relations`: direct relations filtered by `out`, `in`, or `both` and an optional predicate.
 - `graph_impact`: existing Self impact paths; the domain analysis excludes `knowsAbout`.

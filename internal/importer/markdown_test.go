@@ -138,6 +138,7 @@ deploy_path: /srv/example
 domains:
   - one.example.test
   - two.example.test
+ports: [80, 443]
 api_token: TOPSECRET-SYNTHETIC
 ---
 Body ignored
@@ -150,12 +151,33 @@ Body ignored
 		t.Fatal(err)
 	}
 	node := report.Batch.Nodes[0]
-	if node.SoftwareInstance == nil || node.SoftwareInstance.DeploymentPath != "/srv/example" || len(node.SoftwareInstance.Domains) != 2 || node.SoftwareInstance.Domains[1] != "two.example.test" {
+	if node.SoftwareInstance == nil || node.SoftwareInstance.DeploymentPath != "/srv/example" || len(node.SoftwareInstance.Domains) != 2 || node.SoftwareInstance.Domains[1] != "two.example.test" || len(node.SoftwareInstance.Ports) != 2 || node.SoftwareInstance.Ports[1] != 443 {
 		t.Fatalf("list field did not retain type/values: %+v", node.SoftwareInstance)
+	}
+	if !assertionPresent(report.Batch.Assertions, node.ID, "softwareInstance.ports") {
+		t.Fatal("service ports did not produce typed field evidence")
 	}
 	raw, _ := json.Marshal(report)
 	if strings.Contains(string(raw), "TOPSECRET-SYNTHETIC") {
 		t.Fatal("credential value escaped exclusion")
+	}
+}
+
+func TestMarkdownInvalidServicePortsAreExcluded(t *testing.T) {
+	root := t.TempDir()
+	content := "---\ntype: service\nname: Invalid service\nports: [80, 70000]\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "service.md"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 || len(report.Batch.Nodes[0].SoftwareInstance.Ports) != 0 {
+		t.Fatalf("invalid ports must not enter the typed graph: %+v", report.Batch.Nodes)
+	}
+	if len(report.Exclusions) != 1 || !strings.Contains(report.Exclusions[0].Reason, "invalid service ports") {
+		t.Fatalf("invalid ports need an actionable safe exclusion: %+v", report.Exclusions)
 	}
 }
 

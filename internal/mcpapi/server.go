@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -141,6 +142,11 @@ func matchesNodeText(n graph.Node, needle string) bool {
 		}
 		for _, domain := range n.SoftwareInstance.Domains {
 			if contains(domain) {
+				return true
+			}
+		}
+		for _, port := range n.SoftwareInstance.Ports {
+			if contains(strconv.Itoa(port)) {
 				return true
 			}
 		}
