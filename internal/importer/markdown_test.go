@@ -85,6 +85,30 @@ func TestMarkdownFrontmatterCreatesSafeRepeatableCompleteBatch(t *testing.T) {
 	}
 }
 
+func TestMarkdownHardwareImportsLocationAndTypedEvidence(t *testing.T) {
+	root := t.TempDir()
+	content := "---\ntype: hardware\nname: Synthetic host\ncategory: server\nmodel: Example Model\nlocation: lab-rack-2\nstatus: active\n---\nbody ignored\n"
+	if err := os.WriteFile(filepath.Join(root, "host.md"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 {
+		t.Fatalf("expected one imported hardware node: %+v", report)
+	}
+	node := report.Batch.Nodes[0]
+	if node.Hardware == nil || node.Hardware.Location != "lab-rack-2" || node.Hardware.Category != "server" || node.Hardware.Model != "Example Model" {
+		t.Fatalf("hardware frontmatter fields lost: %+v", node.Hardware)
+	}
+	for _, field := range []string{"hardware.location", "hardware.category", "hardware.model", "hardware.status"} {
+		if !assertionPresent(report.Batch.Assertions, node.ID, field) {
+			t.Errorf("expected typed evidence for %s", field)
+		}
+	}
+}
+
 func TestMarkdownFrontmatterKeepsListsTypedAndNeverReturnsCredentialValues(t *testing.T) {
 	root := t.TempDir()
 	content := `---

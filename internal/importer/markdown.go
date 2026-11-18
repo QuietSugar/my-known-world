@@ -194,6 +194,9 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "unmapped type; emitted provisional candidate"})
 		} else {
 			node.Type = target
+			if target == graph.Hardware {
+				node.Hardware = &graph.HardwareDetails{Category: firstString(f.data, "category"), Model: firstString(f.data, "model"), Location: firstString(f.data, "location"), Status: firstString(f.data, "status")}
+			}
 			if target == graph.Machine {
 				details, ex := machineDetails(f.data, kindField, kindMap[strings.ToLower(strings.TrimSpace(typeValue))])
 				node.Machine = details
@@ -387,6 +390,12 @@ func mappedFields(n graph.Node, m map[string]any, kindField string) []markdownMa
 		}
 	}
 	addString("status", "lifecycle")
+	if d := n.Hardware; d != nil {
+		addString("category", "hardware.category")
+		addString("model", "hardware.model")
+		addString("location", "hardware.location")
+		addString("status", "hardware.status")
+	}
 	if d := n.Machine; d != nil {
 		addString("hostname", "machine.hostname")
 		addString("os", "machine.os")
