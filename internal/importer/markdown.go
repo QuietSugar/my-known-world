@@ -450,7 +450,7 @@ func firstString(m map[string]any, keys ...string) string {
 	return ""
 }
 func stringValue(v any) (string, bool) { s, ok := v.(string); return s, ok }
-func boolValue(v any) bool { value, _ := v.(bool); return value }
+func boolValue(v any) bool             { value, _ := v.(bool); return value }
 func stringList(v any) []string {
 	if s, ok := stringValue(v); ok {
 		if strings.TrimSpace(s) == "" {
