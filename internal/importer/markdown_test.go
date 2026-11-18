@@ -233,7 +233,7 @@ func TestMarkdownProductInstancesAndTaskRelatedReferencesBecomeTypedRelations(t 
 	files := map[string]string{
 		"product/app.md": "---\ntype: product\nname: App\ninstances: ../service/app.md\n---\n",
 		"service/app.md": "---\ntype: service\nname: App service\n---\n",
-		"task/setup.md": "---\ntype: task\nname: Setup task\nrelated: ../service/app.md\n---\n",
+		"task/setup.md":  "---\ntype: task\nname: Setup task\nrelated: ../service/app.md\n---\n",
 		"runbook/app.md": "---\ntype: runbook\nname: App runbook\nscope: production service\ntrigger: service outage\n---\n",
 	}
 	for name, content := range files {
