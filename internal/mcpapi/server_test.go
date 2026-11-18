@@ -23,6 +23,7 @@ func testGraph() *graph.Graph {
 	_ = g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", Source: "fixture", EvidenceKind: graph.EvidenceManual, Certainty: graph.CertaintyConfirmed, ModelVersion: 1})
 	_ = g.Publish(graph.Node{ID: "machine", Type: graph.Machine, Name: "Fixture machine", Source: "fixture", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1, Machine: &graph.MachineDetails{Hostname: "example.invalid"}}, graph.Relation{ID: "owns-machine", Predicate: graph.Owns, To: "machine", Source: "fixture", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
 	_ = g.AddRelation(graph.Relation{ID: "maintains-machine", From: "self", Predicate: graph.Maintains, To: "machine", Source: "fixture", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
+	_ = g.Publish(graph.Node{ID: "service", Type: graph.SoftwareInstance, Name: "Fixture service", Source: "fixture", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1, SoftwareInstance: &graph.SoftwareInstanceDetails{ProductName: "ExampleApp", Domains: []string{"service.example.invalid"}}}, graph.Relation{ID: "machine-hosts-service", From: "machine", Predicate: graph.Hosts, To: "service", Source: "fixture", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
 	_ = g.AddAssertion(graph.FieldAssertion{ID: "safe-assertion", NodeID: "machine", FieldPath: "machine.hostname", ValueHash: graph.HashFieldValue("example.invalid"), Reference: "wiki/machine.md", Source: "fixture", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
 	_ = g.Publish(graph.Node{ID: "known", Type: graph.SoftwareProject, Name: "Known only", Source: "fixture", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1}, graph.Relation{ID: "knows-project", Predicate: graph.KnowsAbout, To: "known", Source: "fixture", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
 	return g
@@ -65,6 +66,15 @@ func TestMCPStreamableHTTPToolsAreTypedReadOnlyAndMatchGraphSemantics(t *testing
 	var emptyOut QueryOutput
 	if err := json.Unmarshal(emptyJSON, &emptyOut); err != nil || emptyOut.Items == nil || len(emptyOut.Items) != 0 || emptyOut.Count != 0 {
 		t.Fatalf("empty query must return structured empty array, got %s (%v)", emptyJSON, err)
+	}
+	hosted, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "graph_query", Arguments: map[string]any{"hostId": "machine", "type": "SoftwareInstance", "text": "EXAMPLE.INVALID"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostedJSON, _ := json.Marshal(hosted.StructuredContent)
+	var hostedOut QueryOutput
+	if err := json.Unmarshal(hostedJSON, &hostedOut); err != nil || hostedOut.Count != 1 || hostedOut.Items[0].ID != "service" {
+		t.Fatalf("host and case-insensitive domain filter failed: %s (%v)", hostedJSON, err)
 	}
 	entity, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "graph_entity", Arguments: map[string]any{"id": "machine"}})
 	if err != nil {
