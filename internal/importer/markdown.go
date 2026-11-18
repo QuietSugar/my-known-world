@@ -210,8 +210,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 				details, ex := machineDetails(f.data, kindField, configuredKind)
 				node.Machine = details
 				if ex != "" {
-					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: ex + "; record excluded"})
-					continue
+					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: ex})
 				}
 			}
 			if target == graph.SoftwareInstance {
