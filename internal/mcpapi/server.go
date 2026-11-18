@@ -38,7 +38,7 @@ func NewServer(load GraphLoader, history HistoryReader, assertionReaders ...Asse
 	if len(assertionReaders) > 0 {
 		s.assertions = assertionReaders[0]
 	}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "my-known-world", Version: "0.0.5"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "my-known-world", Version: "0.0.6"}, nil)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_query", Description: "Filter graph node summaries by type, lifecycle, certainty, evidence, hosting machine, and case-insensitive text across safe modeled fields."}, s.query)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_entity", Description: "Get typed node details, direct relations, Self path/category, and value-free assertion metadata."}, s.entity)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_relations", Description: "List direct relations for a node with direction and optional predicate filters."}, s.relations)
