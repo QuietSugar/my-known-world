@@ -255,15 +255,16 @@ func TestMarkdownProductInstancesAndTaskRelatedReferencesBecomeTypedRelations(t 
 	if !found[graph.HasInstance] || !found[graph.RelatedTo] || len(report.Batch.Relations) != 2 {
 		t.Fatalf("expected typed product-instance and task-related references, got %+v", report.Batch.Relations)
 	}
-	runbook, ok := func() (graph.Node, bool) {
+	var runbook graph.Node
+	foundRunbook := false
 	for _, node := range report.Batch.Nodes {
 		if node.Type == graph.Runbook {
-			return node, true
+			runbook = node
+			foundRunbook = true
+			break
 		}
 	}
-	return graph.Node{}, false
-	}()
-	if !ok || runbook.Runbook == nil || runbook.Runbook.Scope != "production service" || !assertionPresent(report.Batch.Assertions, runbook.ID, "runbook.scope") {
+	if !foundRunbook || runbook.Runbook == nil || runbook.Runbook.Scope != "production service" || !assertionPresent(report.Batch.Assertions, runbook.ID, "runbook.scope") {
 		t.Fatalf("runbook scope should map with typed evidence: %+v", runbook)
 	}
 	g := graph.New()
