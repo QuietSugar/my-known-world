@@ -11,7 +11,7 @@ import (
 )
 
 func markdownConfig() MarkdownConfig {
-	return MarkdownConfig{Source: "wiki:private-test", TypeMappings: map[string]graph.NodeType{"hardware": graph.Hardware, "vm": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "service": graph.SoftwareInstance, "product": graph.Product, "task": graph.WorkItem, "runbook": graph.Runbook}, MachineKindMappings: map[string]string{"vm": "virtual", "shared": "shared"}}
+	return MarkdownConfig{Source: "wiki:private-test", TypeMappings: map[string]graph.NodeType{"hardware": graph.Hardware, "vm": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "service": graph.SoftwareInstance, "product": graph.Product, "task": graph.WorkItem, "runbook": graph.Runbook, "software_project": graph.SoftwareProject, "document": graph.Document, "network": graph.Network, "credential": graph.AccountCredential}, MachineKindMappings: map[string]string{"vm": "virtual", "shared": "shared"}}
 }
 
 func assertionPresent(assertions []graph.FieldAssertion, nodeID, fieldPath string) bool {
@@ -280,6 +280,51 @@ func TestMarkdownProductInstancesAndTaskRelatedReferencesBecomeTypedRelations(t 
 	}
 }
 
+func TestMarkdownImportsRemainingModeledFrontmatterWithoutSecretValues(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"project/app.md":      "---\ntype: software_project\nname: App source\npurpose: synthetic app\nlanguages: [Go, TypeScript]\nremote_repository: https://example.invalid/app.git\n---\n",
+		"document/ops.md":     "---\ntype: document\nname: Operations reference\nrole: runbook-reference\nauthoritative_reference: private://ops\neffective: true\n---\n",
+		"network/lab.md":      "---\ntype: network\nname: Synthetic lab\nkind: private\ncidrs: [192.0.2.0/24]\naccess_locations: [local-console]\n---\n",
+		"credential/admin.md": "---\ntype: credential\nname: Admin access pointer\naccount: synthetic-admin\ncredential_type: ssh-key\npurpose: maintenance\nscope: lab\naccess_reference: private://vault/item\npassword: SHOULD_NEVER_IMPORT\n---\n",
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := map[graph.NodeType]graph.Node{}
+	for _, node := range report.Batch.Nodes {
+		nodes[node.Type] = node
+	}
+	if nodes[graph.SoftwareProject].SoftwareProject == nil || len(nodes[graph.SoftwareProject].SoftwareProject.Languages) != 2 {
+		t.Fatalf("software project fields missing: %+v", nodes[graph.SoftwareProject])
+	}
+	if nodes[graph.Document].Document == nil || !nodes[graph.Document].Document.Effective {
+		t.Fatalf("document frontmatter fields missing: %+v", nodes[graph.Document])
+	}
+	if nodes[graph.Network].Network == nil || len(nodes[graph.Network].Network.CIDRs) != 1 {
+		t.Fatalf("network fields missing: %+v", nodes[graph.Network])
+	}
+	credential := nodes[graph.AccountCredential].AccountCredential
+	if credential == nil || credential.AccessReference != "private://vault/item" || credential.Account != "synthetic-admin" {
+		t.Fatalf("safe credential pointers missing: %+v", credential)
+	}
+	raw, _ := json.Marshal(report)
+	if strings.Contains(string(raw), "SHOULD_NEVER_IMPORT") {
+		t.Fatal("secret value leaked into Markdown batch")
+	}
+	if !assertionPresent(report.Batch.Assertions, "network/lab.md", "network.cidrs") || !assertionPresent(report.Batch.Assertions, "document/ops.md", "document.effective") {
+		t.Fatal("typed field assertions missing")
+	}
+}
 func TestMarkdownBatchAppliesIdempotentlyAndExplicitRenameMappingPreservesIdentity(t *testing.T) {
 	root := t.TempDir()
 	write := func(name, content string) {

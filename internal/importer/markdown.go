@@ -210,7 +210,8 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 				details, ex := machineDetails(f.data, kindField, configuredKind)
 				node.Machine = details
 				if ex != "" {
-					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: ex})
+					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: ex + "; record excluded"})
+					continue
 				}
 			}
 			if target == graph.SoftwareInstance {
@@ -220,8 +221,26 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: ex})
 				}
 			}
+			if target == graph.SoftwareProject {
+				node.SoftwareProject = &graph.SoftwareProjectDetails{Purpose: firstString(f.data, "purpose"), Languages: stringList(f.data["languages"]), Form: firstString(f.data, "form"), RemoteRepository: firstString(f.data, "remote_repository", "repository"), Upstream: firstString(f.data, "upstream"), MaintenanceState: firstString(f.data, "maintenance_state"), RecommendedVersion: firstString(f.data, "recommended_version"), SuccessorID: firstString(f.data, "successor_id")}
+			}
+			if target == graph.Product {
+				node.Product = &graph.ProductDetails{Purpose: firstString(f.data, "purpose"), CommonConfigurationReference: firstString(f.data, "common_configuration_reference"), RunbookReference: firstString(f.data, "runbook_reference")}
+			}
+			if target == graph.Document {
+				node.Document = &graph.DocumentDetails{Role: firstString(f.data, "role"), AuthoritativeReference: firstString(f.data, "authoritative_reference"), Effective: boolValue(f.data["effective"]), SupersededBy: firstString(f.data, "superseded_by")}
+			}
 			if target == graph.Runbook {
-				node.Runbook = &graph.RunbookDetails{Scope: firstString(f.data, "scope"), Trigger: firstString(f.data, "trigger")}
+				node.Runbook = &graph.RunbookDetails{Scope: firstString(f.data, "scope"), Trigger: firstString(f.data, "trigger"), Preconditions: stringList(f.data["preconditions"]), StepsReference: firstString(f.data, "steps_reference"), StopConditionReference: firstString(f.data, "stop_condition_reference"), RollbackReference: firstString(f.data, "rollback_reference"), VerificationMethod: firstString(f.data, "verification_method"), ExecutableStatus: firstString(f.data, "executable_status"), ApprovalRequired: boolValue(f.data["approval_required"])}
+			}
+			if target == graph.WorkItem {
+				node.WorkItem = &graph.WorkItemDetails{Kind: firstString(f.data, "kind"), Status: firstString(f.data, "status"), RationaleReference: firstString(f.data, "rationale_reference"), DecisionEvidenceReference: firstString(f.data, "decision_evidence_reference")}
+			}
+			if target == graph.Network {
+				node.Network = &graph.NetworkDetails{Kind: firstString(f.data, "kind"), CIDRs: stringList(f.data["cidrs"]), GatewayReference: firstString(f.data, "gateway_reference"), AccessLocations: stringList(f.data["access_locations"]), VPNReference: firstString(f.data, "vpn_reference"), Status: firstString(f.data, "status")}
+			}
+			if target == graph.AccountCredential {
+				node.AccountCredential = &graph.AccountCredentialDetails{Account: firstString(f.data, "account"), CredentialType: firstString(f.data, "credential_type"), Purpose: firstString(f.data, "purpose"), Scope: firstString(f.data, "scope"), AccessReference: firstString(f.data, "access_reference"), Status: firstString(f.data, "status")}
 			}
 			for _, field := range mappedFields(node, f.data) {
 				raw, e := json.Marshal(field.value)
@@ -353,7 +372,7 @@ func readFrontmatter(file string) ([]byte, bool, int, error) {
 	return nil, false, line, nil
 }
 func invalidMarkdownFieldReason(m map[string]any) string {
-	stringFields := []string{"type", "id", "name", "title", "status", "hostname", "os", "location", "category", "model", "scope", "trigger", "deploy_path", "deployment_path"}
+	stringFields := []string{"type", "id", "name", "title", "status", "hostname", "os", "location", "category", "model", "scope", "trigger", "deploy_path", "deployment_path", "purpose", "form", "remote_repository", "repository", "upstream", "maintenance_state", "recommended_version", "successor_id", "common_configuration_reference", "runbook_reference", "role", "authoritative_reference", "superseded_by", "steps_reference", "stop_condition_reference", "rollback_reference", "verification_method", "executable_status", "kind", "rationale_reference", "decision_evidence_reference", "gateway_reference", "vpn_reference", "account", "credential_type", "access_reference"}
 	for _, key := range stringFields {
 		if value, exists := m[key]; exists {
 			if _, ok := value.(string); !ok {
@@ -361,15 +380,39 @@ func invalidMarkdownFieldReason(m map[string]any) string {
 			}
 		}
 	}
-	listFields := []string{"ip", "ips", "constraints", "allowed_operations", "forbidden_operations", "owned", "domains", "domain", "parent", "host", "instances", "related"}
+	listFields := []string{"ip", "ips", "constraints", "allowed_operations", "forbidden_operations", "owned", "domains", "domain", "parent", "host", "instances", "related", "languages", "preconditions", "cidrs", "access_locations"}
 	for _, key := range listFields {
 		if value, exists := m[key]; exists && !isStringOrStringList(value) {
 			return "invalid frontmatter field type; record excluded"
 		}
 	}
+	if _, hasIP := m["ip"]; hasIP {
+		if _, hasIPs := m["ips"]; hasIPs {
+			return "both ip and ips are present; record excluded as ambiguous"
+		}
+	}
+	for _, key := range []string{"ip", "ips"} {
+		for _, raw := range stringList(m[key]) {
+			if net.ParseIP(raw) == nil {
+				return "invalid machine IP address; record excluded"
+			}
+		}
+	}
+	for _, raw := range stringList(m["cidrs"]) {
+		if _, _, err := net.ParseCIDR(raw); err != nil {
+			return "invalid network CIDR; record excluded"
+		}
+	}
 	if value, exists := m["ports"]; exists {
 		if _, ok := portList(value); !ok {
 			return "invalid service ports; expected integers from 1 through 65535; record excluded"
+		}
+	}
+	for _, key := range []string{"effective", "approval_required"} {
+		if value, exists := m[key]; exists {
+			if _, ok := value.(bool); !ok {
+				return "invalid frontmatter field type; record excluded"
+			}
 		}
 	}
 	return ""
@@ -407,6 +450,7 @@ func firstString(m map[string]any, keys ...string) string {
 	return ""
 }
 func stringValue(v any) (string, bool) { s, ok := v.(string); return s, ok }
+func boolValue(v any) bool { value, _ := v.(bool); return value }
 func stringList(v any) []string {
 	if s, ok := stringValue(v); ok {
 		if strings.TrimSpace(s) == "" {
@@ -560,6 +604,31 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 			add("machine.forbiddenOperations", append([]string{}, d.ForbiddenOperations...))
 		}
 	}
+	if d := n.SoftwareProject; d != nil {
+		addString("purpose", "softwareProject.purpose")
+		addString("form", "softwareProject.form")
+		addString("remote_repository", "softwareProject.remoteRepository")
+		if len(d.Languages) > 0 {
+			add("softwareProject.languages", append([]string{}, d.Languages...))
+		}
+		addString("upstream", "softwareProject.upstream")
+		addString("maintenance_state", "softwareProject.maintenanceState")
+		addString("recommended_version", "softwareProject.recommendedVersion")
+		addString("successor_id", "softwareProject.successorId")
+	}
+	if d := n.Product; d != nil {
+		addString("purpose", "product.purpose")
+		addString("common_configuration_reference", "product.commonConfigurationReference")
+		addString("runbook_reference", "product.runbookReference")
+	}
+	if d := n.Document; d != nil {
+		addString("role", "document.role")
+		addString("authoritative_reference", "document.authoritativeReference")
+		addString("superseded_by", "document.supersededBy")
+		if _, exists := m["effective"]; exists {
+			add("document.effective", d.Effective)
+		}
+	}
 	if d := n.Runbook; d != nil {
 		if d.Scope != "" {
 			add("runbook.scope", d.Scope)
@@ -567,6 +636,43 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 		if d.Trigger != "" {
 			add("runbook.trigger", d.Trigger)
 		}
+		if len(d.Preconditions) > 0 {
+			add("runbook.preconditions", append([]string{}, d.Preconditions...))
+		}
+		addString("steps_reference", "runbook.stepsReference")
+		addString("stop_condition_reference", "runbook.stopConditionReference")
+		addString("rollback_reference", "runbook.rollbackReference")
+		addString("verification_method", "runbook.verificationMethod")
+		addString("executable_status", "runbook.executableStatus")
+		if _, exists := m["approval_required"]; exists {
+			add("runbook.approvalRequired", d.ApprovalRequired)
+		}
+	}
+	if d := n.WorkItem; d != nil {
+		addString("kind", "workItem.kind")
+		addString("status", "workItem.status")
+		addString("rationale_reference", "workItem.rationaleReference")
+		addString("decision_evidence_reference", "workItem.decisionEvidenceReference")
+	}
+	if d := n.Network; d != nil {
+		addString("kind", "network.kind")
+		addString("gateway_reference", "network.gatewayReference")
+		addString("vpn_reference", "network.vpnReference")
+		addString("status", "network.status")
+		if len(d.CIDRs) > 0 {
+			add("network.cidrs", append([]string{}, d.CIDRs...))
+		}
+		if len(d.AccessLocations) > 0 {
+			add("network.accessLocations", append([]string{}, d.AccessLocations...))
+		}
+	}
+	if d := n.AccountCredential; d != nil {
+		addString("account", "accountCredential.account")
+		addString("credential_type", "accountCredential.credentialType")
+		addString("purpose", "accountCredential.purpose")
+		addString("scope", "accountCredential.scope")
+		addString("access_reference", "accountCredential.accessReference")
+		addString("status", "accountCredential.status")
 	}
 	if d := n.SoftwareInstance; d != nil {
 		if d.DeploymentPath != "" {
