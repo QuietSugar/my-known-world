@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
+	"github.com/QuietSugar/my-known-world/internal/importer"
+	yaml "github.com/goccy/go-yaml"
 )
 
 func TestExportWritesDeterministicSafeCopiesAndRefusesOverwrite(t *testing.T) {
@@ -42,6 +44,37 @@ func TestExportWritesDeterministicSafeCopiesAndRefusesOverwrite(t *testing.T) {
 	}
 	if _, _, err := Export(root, g, Options{}); err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Fatalf("expected overwrite refusal, got %v", err)
+	}
+}
+
+func TestExportProducesImporterConfigForSupportedRoundTrip(t *testing.T) {
+	g := graph.New()
+	n := graph.Node{ID: "stable-service-id", Type: graph.SoftwareInstance, Name: "Round trip service", Lifecycle: "stopped", Source: "fixture", ModelVersion: 1, SoftwareInstance: &graph.SoftwareInstanceDetails{Domains: []string{"roundtrip.example.test"}, Ports: []int{8443}, DeploymentPath: "/srv/app", OperationalState: "stopped"}}
+	if err := g.AddNode(n); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "export")
+	if _, _, err := Export(root, g, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	configData, err := os.ReadFile(filepath.Join(root, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config importer.MarkdownConfig
+	if err := yaml.Unmarshal(configData, &config); err != nil {
+		t.Fatal(err)
+	}
+	report, err := importer.MarkdownFrontmatter(root, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 || len(report.Batch.IdentityMappings) != 1 || report.Batch.IdentityMappings[0].NodeID != n.ID {
+		t.Fatalf("unexpected round-trip source batch: %+v", report.Batch)
+	}
+	got := report.Batch.Nodes[0]
+	if got.Name != n.Name || got.Lifecycle != n.Lifecycle || got.SoftwareInstance == nil || got.SoftwareInstance.DeploymentPath != n.SoftwareInstance.DeploymentPath || len(got.SoftwareInstance.Domains) != 1 || got.SoftwareInstance.Domains[0] != n.SoftwareInstance.Domains[0] || len(got.SoftwareInstance.Ports) != 1 || got.SoftwareInstance.Ports[0] != 8443 {
+		t.Fatalf("unexpected structured round trip: %+v", got)
 	}
 }
 

@@ -29,9 +29,10 @@ type IdentityMapping struct {
 	NodeID   string `yaml:"nodeId" json:"nodeId"`
 }
 type ManifestNode struct {
-	ID   string         `yaml:"id" json:"id"`
-	Type graph.NodeType `yaml:"type" json:"type"`
-	Path string         `yaml:"path" json:"path"`
+	ID        string          `yaml:"id" json:"id"`
+	Type      graph.NodeType  `yaml:"type" json:"type"`
+	Certainty graph.Certainty `yaml:"certainty" json:"certainty"`
+	Path      string          `yaml:"path" json:"path"`
 }
 type ManifestRelation struct {
 	ID        string          `yaml:"id" json:"id"`
@@ -65,7 +66,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 	}
 	manifest := Manifest{Version: 1, Nodes: []ManifestNode{}, IdentityMappings: []IdentityMapping{}, Relations: []ManifestRelation{}}
 	fileOutputs := map[string][]byte{}
-	report := Report{Unsupported: []string{"Original Markdown bodies were not stored and cannot be recovered.", "History, assertion hashes, and evidence values are not materialized."}}
+	report := Report{Unsupported: []string{"Original Markdown bodies were not stored and cannot be recovered.", "History, assertion hashes, and evidence values are not materialized.", "Not every typed model field is currently mapped by the Markdown importer; this export is not yet a complete round trip (see layered-adapters documentation)."}}
 	nodes := g.Nodes()
 	nodePaths := map[string]string{}
 	for _, n := range nodes {
@@ -98,7 +99,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 			report.Unsupported = append(report.Unsupported, n.ID+": certainty "+string(n.Certainty)+" is descriptive only; current Markdown importer cannot restore it")
 		}
 		fileOutputs[path] = content
-		manifest.Nodes = append(manifest.Nodes, ManifestNode{ID: n.ID, Type: n.Type, Path: path})
+		manifest.Nodes = append(manifest.Nodes, ManifestNode{ID: n.ID, Type: n.Type, Certainty: n.Certainty, Path: path})
 		manifest.IdentityMappings = append(manifest.IdentityMappings, IdentityMapping{SourceID: path, NodeID: n.ID})
 	}
 	for _, r := range g.Relations() {
@@ -117,7 +118,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 	sort.Slice(manifest.Relations, func(i, j int) bool { return manifest.Relations[i].ID < manifest.Relations[j].ID })
 	sort.Strings(report.Unsupported)
 	report.Unsupported = unique(report.Unsupported)
-	for name, value := range map[string]any{"manifest.yaml": manifest, "unsupported.yaml": report} {
+	for name, value := range map[string]any{"manifest.yaml": manifest, "unsupported.yaml": report, "config.yaml": importConfig(manifest)} {
 		b, err := yaml.Marshal(value)
 		if err != nil {
 			return Manifest{}, Report{}, err
@@ -233,9 +234,6 @@ func renderNode(n graph.Node, currentPath string, paths map[string]string, relat
 	if n.Lifecycle != "" {
 		fields["status"] = n.Lifecycle
 	}
-	if n.Certainty != "" {
-		fields["certainty"] = n.Certainty
-	}
 	unsupported := []string{}
 	// Marshal only modeled detail structs; node provenance/evidence references and hashes are not copied.
 	if raw, err := n.MarshalModelDetails(); err != nil {
@@ -290,6 +288,14 @@ func markdownTypeSupported(t graph.NodeType) bool {
 		return true
 	default:
 		return false
+	}
+}
+func importConfig(manifest Manifest) map[string]any {
+	return map[string]any{
+		"source":           "materialized-export",
+		"typeMappings":     map[string]graph.NodeType{"hardware": graph.Hardware, "machine": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "software_project": graph.SoftwareProject, "service": graph.SoftwareInstance, "credential": graph.AccountCredential, "product": graph.Product, "design": graph.Document, "runbook": graph.Runbook, "task": graph.WorkItem, "network": graph.Network},
+		"machineKindField": "machine_kind",
+		"identityMappings": manifest.IdentityMappings,
 	}
 }
 func sourceType(n graph.Node) string {

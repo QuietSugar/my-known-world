@@ -14,6 +14,6 @@ Example:
 go run ./cmd/myknownworld-materialize --api http://127.0.0.1:8080 --out ./materialized-copy
 ```
 
-## Credential-provider boundary
+## CMDB and credential-provider boundaries
 
-`internal/cmdb` defines an upper-layer secret-provider contract with create/read/update/rotate/disable operations and a separate authorization interface. It deliberately has no default plaintext or in-memory provider, does not add secret fields to graph entities, and does not connect provider calls to the core graph write token. A deployment must supply and authorize a production provider before the workflow can be enabled. This package is a boundary and test seam, not yet a deployable Vaultwarden integration or complete CMDB UI.
+`internal/cmdb` now defines generic environment grouping metadata and a repository-backed catalog service with search/filter operations; it does not extend the core graph schema. It defines an upper-layer secret-provider contract with create/read/update/rotate/disable operations and a separate authorization interface. It deliberately has no default plaintext or in-memory provider, does not add secret fields to graph entities, and does not connect provider calls to the core graph write token. A deployment must supply and authorize a production provider before the workflow can be enabled. This package is a boundary and test seam, not yet a deployable Vaultwarden integration or complete CMDB UI.
