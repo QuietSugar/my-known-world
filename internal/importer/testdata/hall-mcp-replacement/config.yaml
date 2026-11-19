@@ -1,0 +1,14 @@
+source: synthetic-hall-mcp-replacement
+typeMappings:
+  hardware: Hardware
+  rig: Machine
+  shared: Machine
+  service: SoftwareInstance
+  product: Product
+  runbook: Runbook
+  task: WorkItem
+  design: Document
+  network: Network
+machineKindMappings:
+  rig: rig
+  shared: shared

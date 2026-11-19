@@ -4,6 +4,8 @@
 
 The `internal/fixtures` Go package embeds the JSON and supplies `SyntheticWorld()` to tests. Tests validate graph connectivity, predicate/type coverage, impact excluding `knowsAbout`, idempotent replay, provisional classification, and PostgreSQL batch apply/round-trip.
 
+A separate [realistic Markdown replacement corpus](../internal/importer/testdata/hall-mcp-replacement/README.md) models all hall-mcp source types, typed frontmatter references, entity-only relative links, and invalid source records. It is fully synthetic and intended for importer, discovery, and cutover development without exposing a private corpus.
+
 ## Run the checks
 
 ```sh
