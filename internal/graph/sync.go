@@ -60,28 +60,28 @@ type FieldConflict struct {
 }
 
 type SyncPreview struct {
-	ExpectedRevision  string          `json:"expectedRevision,omitempty"`
-	PlanHash          string          `json:"planHash,omitempty"`
-	Source            string          `json:"source"`
-	SourceHash        string          `json:"sourceHash"`
-	ParserVersion     string          `json:"parserVersion,omitempty"`
-	AddedNodes        []string        `json:"addedNodes"`
-	UpdatedNodes      []string        `json:"updatedNodes"`
-	AddedRelations    []string        `json:"addedRelations"`
-	UpdatedRels       []string        `json:"updatedRelations"`
-	MissingNodes      []string        `json:"missingNodes"`
-	NewlyMissingNodes []string        `json:"newlyMissingNodes"`
-	StaleNodes        []string        `json:"alreadyStaleNodes"`
-	MissingRels       []string        `json:"missingRelations"`
-	NewlyMissingRels  []string        `json:"newlyMissingRelations"`
-	StaleRels         []string        `json:"alreadyStaleRelations"`
-	Conflicts         []string        `json:"conflicts"`
-	AddedAssertions      []string        `json:"addedAssertions"`
-	UpdatedAssertions    []string        `json:"updatedAssertions"`
-	MissingAssertions    []string        `json:"missingAssertions"`
-	NewlyMissingAssertions []string      `json:"newlyMissingAssertions"`
-	StaleAssertions      []string        `json:"alreadyStaleAssertions"`
-	ValueConflicts    []FieldConflict `json:"valueConflicts"`
+	ExpectedRevision       string          `json:"expectedRevision,omitempty"`
+	PlanHash               string          `json:"planHash,omitempty"`
+	Source                 string          `json:"source"`
+	SourceHash             string          `json:"sourceHash"`
+	ParserVersion          string          `json:"parserVersion,omitempty"`
+	AddedNodes             []string        `json:"addedNodes"`
+	UpdatedNodes           []string        `json:"updatedNodes"`
+	AddedRelations         []string        `json:"addedRelations"`
+	UpdatedRels            []string        `json:"updatedRelations"`
+	MissingNodes           []string        `json:"missingNodes"`
+	NewlyMissingNodes      []string        `json:"newlyMissingNodes"`
+	StaleNodes             []string        `json:"alreadyStaleNodes"`
+	MissingRels            []string        `json:"missingRelations"`
+	NewlyMissingRels       []string        `json:"newlyMissingRelations"`
+	StaleRels              []string        `json:"alreadyStaleRelations"`
+	Conflicts              []string        `json:"conflicts"`
+	AddedAssertions        []string        `json:"addedAssertions"`
+	UpdatedAssertions      []string        `json:"updatedAssertions"`
+	MissingAssertions      []string        `json:"missingAssertions"`
+	NewlyMissingAssertions []string        `json:"newlyMissingAssertions"`
+	StaleAssertions        []string        `json:"alreadyStaleAssertions"`
+	ValueConflicts         []FieldConflict `json:"valueConflicts"`
 }
 
 func canonicalizeBatch(batch SourceBatch) (SourceBatch, error) {
