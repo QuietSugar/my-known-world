@@ -37,6 +37,9 @@ type MarkdownConfig struct {
 	IdentityMappings    []graph.IdentityMapping   `yaml:"identityMappings,omitempty" json:"identityMappings,omitempty"`
 	MachineKindMappings map[string]string         `yaml:"machineKindMappings,omitempty" json:"machineKindMappings,omitempty"`
 	MachineKindField    string                    `yaml:"machineKindField,omitempty" json:"machineKindField,omitempty"`
+	RequiredFields      map[string][]string       `yaml:"requiredFields,omitempty" json:"requiredFields,omitempty"`
+	RequiredAnyFields   map[string][]string       `yaml:"requiredAnyFields,omitempty" json:"requiredAnyFields,omitempty"`
+	StatusValues        map[string][]string       `yaml:"statusValues,omitempty" json:"statusValues,omitempty"`
 	SecretKeyPatterns   []string                  `yaml:"secretKeyPatterns,omitempty" json:"secretKeyPatterns,omitempty"`
 }
 
@@ -98,6 +101,36 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 	for from, to := range cfg.TypeMappings {
 		if strings.TrimSpace(from) == "" || !supportedMarkdownTypes[to] {
 			return MarkdownReport{}, fmt.Errorf("type mapping %q has unsupported target %q", from, to)
+		}
+	}
+	for _, rules := range []map[string][]string{cfg.RequiredFields, cfg.RequiredAnyFields, cfg.StatusValues} {
+		for sourceType, values := range rules {
+			if strings.TrimSpace(sourceType) == "" {
+				return MarkdownReport{}, errors.New("invalid validation rule source type")
+			}
+			if _, exists := cfg.TypeMappings[sourceType]; !exists {
+				mapped := false
+				for mapping := range cfg.TypeMappings {
+					if strings.EqualFold(strings.TrimSpace(mapping), strings.TrimSpace(sourceType)) {
+						mapped = true
+						break
+					}
+				}
+				if !mapped {
+					return MarkdownReport{}, fmt.Errorf("validation rule has no type mapping for %q", sourceType)
+				}
+			}
+			if len(values) == 0 {
+				return MarkdownReport{}, fmt.Errorf("validation rule for %q must contain values", sourceType)
+			}
+			seen := map[string]bool{}
+			for _, value := range values {
+				value = strings.ToLower(strings.TrimSpace(value))
+				if value == "" || seen[value] {
+					return MarkdownReport{}, fmt.Errorf("validation rule for %q contains an empty or duplicate value", sourceType)
+				}
+				seen[value] = true
+			}
 		}
 	}
 	patterns := make([]*regexp.Regexp, 0, len(defaultSecretPatterns)+len(cfg.SecretKeyPatterns))
@@ -196,9 +229,15 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: reason})
 			continue
 		}
-		collectSecretExclusions(f.rel, f.data, patterns, &report.Exclusions)
 		typeValue, _ := stringValue(f.data["type"])
 		target, hasMapping := cfgMap[strings.ToLower(strings.TrimSpace(typeValue))]
+		if hasMapping {
+			if reason := validateMappedSourceRecord(typeValue, f.data, cfg); reason != "" {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: reason})
+				continue
+			}
+		}
+		collectSecretExclusions(f.rel, f.data, patterns, &report.Exclusions)
 		name := firstString(f.data, "name", "title")
 		if name == "" {
 			name = strings.TrimSuffix(path.Base(f.rel), path.Ext(f.rel))
@@ -265,6 +304,60 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			mapped[f.rel] = node
 		}
 		report.Batch.Nodes = append(report.Batch.Nodes, node)
+	}
+	invalidRecords := map[string]string{}
+	for changed := true; changed; {
+		changed = false
+		for _, f := range files {
+			child, ok := mapped[f.rel]
+			if !ok || child.Type == graph.ProvisionalObject || invalidRecords[f.rel] != "" {
+				continue
+			}
+			for _, key := range []string{"parent", "host"} {
+				for _, rawRef := range stringList(f.data[key]) {
+					targetPath, valid := safeReference(f.rel, rawRef, filePaths)
+					if !valid || !filePaths[targetPath] {
+						invalidRecords[f.rel] = "frontmatter " + key + " reference is invalid or missing; record excluded"
+						break
+					}
+					parent, exists := mapped[targetPath]
+					if !exists || invalidRecords[targetPath] != "" {
+						invalidRecords[f.rel] = "frontmatter " + key + " target is not a valid mapped entity; record excluded"
+						break
+					}
+					if !validHosts(parent.Type, child.Type) {
+						invalidRecords[f.rel] = "frontmatter " + key + " target has an incompatible mapped type; record excluded"
+						break
+					}
+				}
+				if invalidRecords[f.rel] != "" {
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	if len(invalidRecords) > 0 {
+		for _, f := range files {
+			if reason := invalidRecords[f.rel]; reason != "" {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: reason})
+				delete(mapped, f.rel)
+			}
+		}
+		validNodes := report.Batch.Nodes[:0]
+		for _, node := range report.Batch.Nodes {
+			if invalidRecords[node.ID] == "" {
+				validNodes = append(validNodes, node)
+			}
+		}
+		report.Batch.Nodes = validNodes
+		validAssertions := report.Batch.Assertions[:0]
+		for _, assertion := range report.Batch.Assertions {
+			if invalidRecords[assertion.NodeID] == "" {
+				validAssertions = append(validAssertions, assertion)
+			}
+		}
+		report.Batch.Assertions = validAssertions
 	}
 	relationSeen := map[string]bool{}
 	for _, f := range files {
@@ -479,6 +572,63 @@ func readMarkdownLinks(file string) ([]markdownLink, error) {
 		return nil, err
 	}
 	return links, nil
+}
+
+func validateMappedSourceRecord(sourceType string, fields map[string]any, cfg MarkdownConfig) string {
+	for _, required := range configValuesForType(cfg.RequiredFields, sourceType) {
+		if !frontmatterFieldPresent(fields[required]) {
+			return "missing required field " + required + "; record excluded"
+		}
+	}
+	if requiredAny := configValuesForType(cfg.RequiredAnyFields, sourceType); len(requiredAny) > 0 {
+		present := false
+		for _, field := range requiredAny {
+			if frontmatterFieldPresent(fields[field]) {
+				present = true
+				break
+			}
+		}
+		if !present {
+			return "missing required identity field (" + strings.Join(requiredAny, ", ") + "); record excluded"
+		}
+	}
+	if allowed := configValuesForType(cfg.StatusValues, sourceType); len(allowed) > 0 {
+		status := strings.ToLower(strings.TrimSpace(firstString(fields, "status")))
+		if status == "" {
+			return "missing required status; record excluded"
+		}
+		for _, value := range allowed {
+			if status == strings.ToLower(strings.TrimSpace(value)) {
+				return ""
+			}
+		}
+		return "status is not allowed for mapped source type; record excluded"
+	}
+	return ""
+}
+
+func configValuesForType(rules map[string][]string, sourceType string) []string {
+	for key, values := range rules {
+		if strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(sourceType)) {
+			return values
+		}
+	}
+	return nil
+}
+
+func frontmatterFieldPresent(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []string:
+		return len(typed) > 0
+	case []any:
+		return len(typed) > 0
+	case nil:
+		return false
+	default:
+		return true
+	}
 }
 
 func invalidMarkdownFieldReason(m map[string]any) string {
