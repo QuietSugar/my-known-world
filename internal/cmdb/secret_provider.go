@@ -49,6 +49,20 @@ type SecretProvider interface {
 type Authorizer interface {
 	Authorize(context.Context, Action, string) error
 }
+
+type authorizedApplicationKey struct{}
+
+// RequestSecretAuthorizer permits operations only inside HTTP requests that have
+// already passed the independent CMDB application bearer check.
+type RequestSecretAuthorizer struct{}
+
+func (RequestSecretAuthorizer) Authorize(ctx context.Context, _ Action, _ string) error {
+	if authorized, _ := ctx.Value(authorizedApplicationKey{}).(bool); !authorized {
+		return errors.New("authorized CMDB application context required")
+	}
+	return nil
+}
+
 type SecretService struct {
 	Provider   SecretProvider
 	Authorizer Authorizer

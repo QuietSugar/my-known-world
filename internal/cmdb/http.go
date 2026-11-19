@@ -1,6 +1,7 @@
 package cmdb
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -50,6 +51,7 @@ func (h HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeHTTPError(w, http.StatusUnauthorized, "authorized application access required")
 		return
 	}
+	r = r.WithContext(context.WithValue(r.Context(), authorizedApplicationKey{}, true))
 	path := strings.TrimSuffix(r.URL.EscapedPath(), "/")
 	if path == "" {
 		path = "/"

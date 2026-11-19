@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"log"
 	"net/http"
@@ -43,7 +44,23 @@ func main() {
 	if addr == "" {
 		addr = "127.0.0.1:8082"
 	}
-	handler := cmdb.HTTPHandler{Catalog: cmdb.Catalog{Repository: repo}, Resources: cmdb.ResourceCatalog{Repository: repo}, Authorizer: cmdb.BearerAuthorizer{Token: token}}
+	var secrets cmdb.SecretService
+	switch os.Getenv("CMDB_SECRET_PROVIDER") {
+	case "":
+	case "file":
+		key, err := base64.StdEncoding.DecodeString(os.Getenv("CMDB_VAULT_KEY_BASE64"))
+		if err != nil || len(key) != 32 {
+			log.Fatal("CMDB_VAULT_KEY_BASE64 must encode exactly 32 random bytes")
+		}
+		dir := os.Getenv("CMDB_VAULT_DIR")
+		if dir == "" {
+			log.Fatal("CMDB_VAULT_DIR is required for the file provider")
+		}
+		secrets = cmdb.SecretService{Provider: &cmdb.FileVault{Dir: dir, Key: key}, Authorizer: cmdb.RequestSecretAuthorizer{}}
+	default:
+		log.Fatal("unsupported CMDB_SECRET_PROVIDER; configure a provider implementation")
+	}
+	handler := cmdb.HTTPHandler{Secrets: secrets, Catalog: cmdb.Catalog{Repository: repo}, Resources: cmdb.ResourceCatalog{Repository: repo}, Authorizer: cmdb.BearerAuthorizer{Token: token}}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe() }()
