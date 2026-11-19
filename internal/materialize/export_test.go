@@ -116,7 +116,7 @@ func TestExportMaterializesSupportedRelationsAndStableIdentityMappings(t *testin
 
 func TestExportRecursivelyOmitsSecretLikeDetailValues(t *testing.T) {
 	g := graph.New()
-	node := graph.Node{ID: "hardware-id", Type: graph.Hardware, Name: "Synthetic", ModelVersion: 1, Hardware: &graph.HardwareDetails{Specifications: map[string]string{"cpu": "four-core", "api_token": "synthetic-secret-value"}}}
+	node := graph.Node{ID: "hardware-id", Type: graph.Hardware, Name: "Synthetic", ModelVersion: 1, Hardware: &graph.HardwareDetails{Specifications: map[string]string{"cpu": "four-core", "api_token": "synthetic-secret-value", "notes": "password=embedded-synthetic-value"}}}
 	if err := g.AddNode(node); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestExportRecursivelyOmitsSecretLikeDetailValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "synthetic-secret-value") || !strings.Contains(string(data), "four-core") {
+	if strings.Contains(string(data), "synthetic-secret-value") || strings.Contains(string(data), "embedded-synthetic-value") || !strings.Contains(string(data), "four-core") {
 		t.Fatalf("recursive secret filtering failed: %s", data)
 	}
 }

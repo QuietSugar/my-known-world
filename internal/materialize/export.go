@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -230,6 +231,9 @@ func unique(in []string) []string {
 	return out
 }
 func renderNode(n graph.Node, currentPath string, paths map[string]string, relations []graph.Relation) ([]byte, []string, error) {
+	if looksLikeSecretValue(n.Name) || looksLikeSecretValue(n.Lifecycle) {
+		return nil, nil, fmt.Errorf("node %s has secret-like identity or lifecycle content; refusing materialization", n.ID)
+	}
 	fields := map[string]any{"id": n.ID, "type": sourceType(n), "name": n.Name}
 	if n.Lifecycle != "" {
 		fields["status"] = n.Lifecycle
@@ -354,6 +358,12 @@ func sanitizeValue(value any, path string, notes *[]string) any {
 		return omittedValue
 	}
 	switch typed := value.(type) {
+	case string:
+		if looksLikeSecretValue(typed) {
+			*notes = append(*notes, "secret-like value omitted: "+path)
+			return omittedValue
+		}
+		return typed
 	case map[string]any:
 		clean := make(map[string]any, len(typed))
 		for key, item := range typed {
@@ -376,6 +386,10 @@ func sanitizeValue(value any, path string, notes *[]string) any {
 		return value
 	}
 }
+
+var secretValuePattern = regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*[^\s,;]+|bearer\s+[A-Za-z0-9._~+/-]{12,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----`)
+
+func looksLikeSecretValue(value string) bool { return secretValuePattern.MatchString(value) }
 func isSecretKey(k string) bool {
 	k = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(k, "_", ""), "-", ""))
 	for _, x := range []string{"password", "secret", "token", "privatekey", "apikey"} {

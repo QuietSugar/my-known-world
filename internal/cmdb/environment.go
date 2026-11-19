@@ -42,6 +42,13 @@ func (c Catalog) Save(ctx context.Context, e Environment) error {
 	e.Tags = cleanStrings(e.Tags)
 	e.ServiceIDs = cleanStrings(e.ServiceIDs)
 	e.AccountIDs = cleanStrings(e.AccountIDs)
+	for _, members := range [][]string{e.Tags, e.ServiceIDs, e.AccountIDs} {
+		for _, member := range members {
+			if len(member) > 256 || strings.ContainsAny(member, "\r\n") {
+				return errors.New("environment tags and member IDs must be safe and at most 256 bytes")
+			}
+		}
+	}
 	if len(e.Tags) > 100 || len(e.ServiceIDs) > 1000 || len(e.AccountIDs) > 1000 {
 		return errors.New("environment membership limit exceeded")
 	}
