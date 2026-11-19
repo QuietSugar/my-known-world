@@ -95,6 +95,9 @@ func validateRequest(action Action, ref string, request SecretRequest) error {
 	if len(ref) > 2048 || strings.ContainsAny(ref, "\r\n") {
 		return errors.New("provider reference is invalid")
 	}
+	if action == CreateSecret && (strings.TrimSpace(request.Name) == "" || len(request.Name) > 256 || strings.ContainsAny(request.Name, "\r\n")) {
+		return errors.New("secret name is required and must be safe")
+	}
 	if action == CreateSecret || action == UpdateSecret || action == RotateSecret {
 		if len(request.Value) == 0 || len(request.Value) > 64*1024 {
 			return errors.New("secret value is required and must not exceed 64 KiB")
