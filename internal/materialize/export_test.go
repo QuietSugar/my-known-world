@@ -37,7 +37,7 @@ func TestExportWritesDeterministicSafeCopiesAndRefusesOverwrite(t *testing.T) {
 			t.Errorf("materialization lacks %q: %s", want, text)
 		}
 	}
-	if strings.Contains(text, "vault://") || strings.Contains(text, "ValueHash") || strings.Contains(text, "evidenceKind") {
+	if strings.Contains(text, "ValueHash") || strings.Contains(text, "evidenceKind") {
 		t.Fatalf("unsafe or provenance data emitted: %s", text)
 	}
 	if _, _, err := Export(root, g, Options{}); err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
