@@ -8,10 +8,51 @@ import (
 	"testing"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
+	yaml "github.com/goccy/go-yaml"
 )
 
 func markdownConfig() MarkdownConfig {
 	return MarkdownConfig{Source: "wiki:private-test", TypeMappings: map[string]graph.NodeType{"hardware": graph.Hardware, "vm": graph.Machine, "rig": graph.Machine, "shared": graph.Machine, "service": graph.SoftwareInstance, "product": graph.Product, "task": graph.WorkItem, "runbook": graph.Runbook, "software_project": graph.SoftwareProject, "document": graph.Document, "network": graph.Network, "credential": graph.AccountCredential}, MachineKindMappings: map[string]string{"vm": "virtual", "shared": "shared"}}
+}
+
+func TestHallMCPReplacementCorpusAdmission(t *testing.T) {
+	base := filepath.Join("testdata", "hall-mcp-replacement")
+	configBytes, err := os.ReadFile(filepath.Join(base, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg MarkdownConfig
+	if err := yaml.Unmarshal(configBytes, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	valid, err := MarkdownFrontmatter(filepath.Join(base, "wiki"), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(valid.Batch.Nodes) != 10 || len(valid.Batch.Relations) != 16 {
+		t.Fatalf("valid corpus batch nodes=%d relations=%d, want 10 and 16", len(valid.Batch.Nodes), len(valid.Batch.Relations))
+	}
+	invalid, err := MarkdownFrontmatter(filepath.Join(base, "invalid"), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invalid.Batch.Nodes) != 2 || len(invalid.Batch.Relations) != 0 {
+		t.Fatalf("invalid corpus batch nodes=%d relations=%d, want 2 support nodes and no relations", len(invalid.Batch.Nodes), len(invalid.Batch.Relations))
+	}
+	if len(invalid.Exclusions) < 5 {
+		t.Fatalf("invalid corpus produced only %d actionable exclusions", len(invalid.Exclusions))
+	}
+	for _, excluded := range []string{"services/missing-status.md", "services/wrong-host-type.md", "services/broken-host.md", "machine/empty-shell.md", "designs/invalid-status.md"} {
+		found := false
+		for _, exclusion := range invalid.Exclusions {
+			if exclusion.SourcePath == excluded && strings.TrimSpace(exclusion.Reason) != "" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing actionable exclusion for %s", excluded)
+		}
+	}
 }
 
 func assertionPresent(assertions []graph.FieldAssertion, nodeID, fieldPath string) bool {

@@ -6,7 +6,7 @@ The goal is to support [#22](https://github.com/QuietSugar/my-known-world/issues
 
 ## Layout
 
-- `config.yaml`: explicit source-type and machine-kind mappings.
+- `config.yaml`: explicit source-type and machine-kind mappings plus admission rules for required fields and allowed lifecycle values.
 - `wiki/`: ten valid modeled documents plus one plain Markdown note.
 - `invalid/`: five invalid records and two valid reference targets for schema/admission tests.
 

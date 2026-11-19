@@ -12,3 +12,10 @@ typeMappings:
 machineKindMappings:
   rig: rig
   shared: shared
+requiredFields:
+  service: [status]
+  design: [status]
+requiredAnyFields:
+  rig: [hostname, ip, os]
+statusValues:
+  design: [draft, proposed, approved, superseded]
