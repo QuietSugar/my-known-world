@@ -3,13 +3,14 @@ package cmdb
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestFileVaultIsReachableOnlyAfterCMDBApplicationAuthorization(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef"
-	handler := HTTPHandler{Secrets: SecretService{Provider: &FileVault{Dir: t.TempDir(), Key: []byte("0123456789abcdef0123456789abcdef")}, Authorizer: RequestSecretAuthorizer{}}, Authorizer: BearerAuthorizer{Token: token}}
+	handler := HTTPHandler{Secrets: SecretService{Provider: &FileVault{Dir: filepath.Join(t.TempDir(), "vault"), Key: []byte("0123456789abcdef0123456789abcdef")}, Authorizer: RequestSecretAuthorizer{}}, Authorizer: BearerAuthorizer{Token: token}}
 	request := httptest.NewRequest(http.MethodPost, "/credentials", strings.NewReader(`{"name":"synthetic","value":"synthetic-secret"}`))
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

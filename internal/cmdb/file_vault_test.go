@@ -66,7 +66,7 @@ func TestFileVaultRejectsBadKeyAndTamperedCiphertext(t *testing.T) {
 		t.Fatal("accepted an invalid encryption key")
 	}
 	key := []byte("0123456789abcdef0123456789abcdef")
-	vault = &FileVault{Dir: t.TempDir(), Key: key}
+	vault = &FileVault{Dir: filepath.Join(t.TempDir(), "vault"), Key: key}
 	meta, err := vault.Create(ctx, SecretRequest{Name: "x", Value: []byte("synthetic")})
 	if err != nil {
 		t.Fatal(err)
