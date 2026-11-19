@@ -325,6 +325,46 @@ func TestMarkdownImportsRemainingModeledFrontmatterWithoutSecretValues(t *testin
 		t.Fatal("typed field assertions missing")
 	}
 }
+func TestMarkdownImportsOnlyRelativeLinksAsTypedRelations(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"docs/source.md":    "---\ntype: document\nname: Source record\n---\nPrivate body text MUST NOT APPEAR. [Target](../machine/target.md#details) [same](../machine/target) [[../machine/target.md|wiki]] ![image](../machine/image.md) [external](https://example.invalid/page.md) [missing](../missing.md)\n",
+		"machine/target.md": "---\ntype: vm\nname: Target machine\n---\n",
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Relations) != 1 {
+		t.Fatalf("expected one deduplicated internal link relation, got %+v", report.Batch.Relations)
+	}
+	relation := report.Batch.Relations[0]
+	if relation.Predicate != graph.RelatedTo || relation.From != "docs/source.md" || relation.To != "machine/target.md" {
+		t.Fatalf("unexpected Markdown link relation: %+v", relation)
+	}
+	encoded, _ := json.Marshal(report)
+	if strings.Contains(string(encoded), "Private body text MUST NOT APPEAR") || strings.Contains(string(encoded), "https://example.invalid") || strings.Contains(string(encoded), "../missing.md") {
+		t.Fatal("body text, external URLs, or raw broken-link targets leaked into report")
+	}
+	foundBroken := false
+	for _, exclusion := range report.Exclusions {
+		if exclusion.SourcePath == "docs/source.md" && strings.Contains(exclusion.Reason, "relative Markdown link target") && exclusion.Line == 5 {
+			foundBroken = true
+		}
+	}
+	if !foundBroken {
+		t.Fatalf("broken link should have a safe actionable exclusion: %+v", report.Exclusions)
+	}
+}
+
 func TestMarkdownBatchAppliesIdempotentlyAndExplicitRenameMappingPreservesIdentity(t *testing.T) {
 	root := t.TempDir()
 	write := func(name, content string) {
