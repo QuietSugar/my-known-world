@@ -8,6 +8,24 @@ import (
 	"github.com/QuietSugar/my-known-world/internal/graph"
 )
 
+func TestMigrationRepeatKeepsMarkdownRelationPredicates(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	store := openTestStore(t)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO nodes(id,type,name,model_version) VALUES ('self','Self','Me',1),('product','Product','Product',1),('service','SoftwareInstance','Service',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO relations(id,from_id,predicate,to_id,source,recorded_at) VALUES ('r1','product','hasInstance','service','',now()),('r2','self','relatedTo','service','',now())`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("restart with Markdown relations: %v", err)
+	}
+}
+
 func TestMigrationAddsUnknownProvenanceToLegacyRows(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
