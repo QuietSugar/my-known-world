@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -21,10 +22,12 @@ import (
 	yaml "github.com/goccy/go-yaml"
 )
 
-const MarkdownParserVersion = "markdown-frontmatter-v2"
+const MarkdownParserVersion = "markdown-frontmatter-v3"
 const maxFrontmatterBytes = 1 << 20
 
 var errFrontmatterTooLarge = errors.New("frontmatter exceeds size limit")
+var markdownInlineLinkPattern = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+var markdownWikiLinkPattern = regexp.MustCompile(`\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]`)
 
 // MarkdownConfig is deployment-local source configuration. Keep real wiki paths,
 // type mappings and source identifiers outside public repositories.
@@ -47,8 +50,14 @@ type MarkdownReport struct {
 	Exclusions []MarkdownExclusion `json:"exclusions"`
 }
 type markdownFile struct {
-	rel  string
-	data map[string]any
+	rel   string
+	data  map[string]any
+	links []markdownLink
+}
+
+type markdownLink struct {
+	target string
+	line   int
 }
 
 var defaultSecretPatterns = []string{`(?i)password`, `(?i)secret`, `(?i)token`, `(?i)credential`, `(?i)key`, `(?i)private[_-]?key`, `(?i)api[_-]?key`}
@@ -58,9 +67,9 @@ var supportedMarkdownTypes = map[graph.NodeType]bool{
 	graph.Document: true, graph.Runbook: true, graph.WorkItem: true, graph.Network: true,
 }
 
-// MarkdownFrontmatter walks a complete directory tree and reads only the YAML
-// frontmatter of .md files. It stops reading each file at the closing delimiter;
-// Markdown bodies are never retained, parsed, logged, or emitted.
+// MarkdownFrontmatter walks a complete directory tree and reads YAML
+// frontmatter from .md files. It scans the body only to extract relative link
+// targets; body text is never retained, logged, or emitted.
 func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error) {
 	if strings.TrimSpace(cfg.Source) == "" {
 		return MarkdownReport{}, errors.New("source is required")
@@ -147,7 +156,11 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: rel, Reason: "invalid YAML frontmatter", Line: 2})
 			return nil
 		}
-		files = append(files, markdownFile{rel: rel, data: normalizeMap(values)})
+		links, linkErr := readMarkdownLinks(full)
+		if linkErr != nil {
+			return fmt.Errorf("scan Markdown links %s: %w", rel, linkErr)
+		}
+		files = append(files, markdownFile{rel: rel, data: normalizeMap(values), links: links})
 		return nil
 	})
 	if walkErr != nil {
@@ -328,6 +341,34 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			}
 		}
 	}
+	for _, f := range files {
+		node, ok := mapped[f.rel]
+		if !ok {
+			continue
+		}
+		for _, link := range f.links {
+			targetPath, valid := safeReference(f.rel, link.target, filePaths)
+			if !valid || !filePaths[targetPath] {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "relative Markdown link target is invalid or missing", Line: link.line})
+				continue
+			}
+			target, exists := mapped[targetPath]
+			if !exists {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "relative Markdown link target is not a mapped valid entity", Line: link.line})
+				continue
+			}
+			if node.ID == target.ID {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "self-referential Markdown link was ignored", Line: link.line})
+				continue
+			}
+			rid := relationID(canonicalSourceID(node.ID, cfg.IdentityMappings), graph.RelatedTo, canonicalSourceID(target.ID, cfg.IdentityMappings))
+			if relationSeen[rid] {
+				continue
+			}
+			relationSeen[rid] = true
+			report.Batch.Relations = append(report.Batch.Relations, graph.Relation{ID: rid, From: node.ID, Predicate: graph.RelatedTo, To: target.ID, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
+		}
+	}
 	return report, nil
 }
 
@@ -370,6 +411,76 @@ func readFrontmatter(file string) ([]byte, bool, int, error) {
 	}
 	return nil, false, line, nil
 }
+func readMarkdownLinks(file string) ([]markdownLink, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 4096), 4<<20)
+	line := 0
+	if !scanner.Scan() {
+		return nil, scanner.Err()
+	}
+	line++
+	if strings.TrimSuffix(strings.TrimPrefix(scanner.Text(), "\ufeff"), "\r") != "---" {
+		return nil, nil
+	}
+	for scanner.Scan() {
+		line++
+		text := strings.TrimSuffix(scanner.Text(), "\r")
+		if text == "---" || text == "..." {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	links := []markdownLink{}
+	add := func(raw string, line int, image bool) {
+		if image {
+			return
+		}
+		raw = strings.TrimSpace(raw)
+		if strings.HasPrefix(raw, "<") && strings.HasSuffix(raw, ">") {
+			raw = strings.TrimSuffix(strings.TrimPrefix(raw, "<"), ">")
+		} else if i := strings.IndexAny(raw, " \t"); i >= 0 {
+			raw = raw[:i]
+		}
+		if raw == "" || strings.Contains(raw, ":") || strings.HasPrefix(raw, "#") || strings.HasPrefix(raw, "/") {
+			return
+		}
+		if i := strings.IndexAny(raw, "?#"); i >= 0 {
+			raw = raw[:i]
+		}
+		decoded, err := url.PathUnescape(raw)
+		if err != nil {
+			return
+		}
+		ext := strings.ToLower(path.Ext(decoded))
+		if ext != "" && ext != ".md" {
+			return
+		}
+		links = append(links, markdownLink{target: decoded, line: line})
+	}
+	for scanner.Scan() {
+		line++
+		text := scanner.Text()
+		for _, match := range markdownInlineLinkPattern.FindAllStringSubmatchIndex(text, -1) {
+			image := match[0] > 0 && text[match[0]-1] == '!'
+			add(text[match[2]:match[3]], line, image)
+		}
+		for _, match := range markdownWikiLinkPattern.FindAllStringSubmatch(text, -1) {
+			add(match[1], line, false)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return links, nil
+}
+
 func invalidMarkdownFieldReason(m map[string]any) string {
 	stringFields := []string{"type", "id", "name", "title", "status", "hostname", "os", "location", "category", "model", "scope", "trigger", "deploy_path", "deployment_path", "purpose", "form", "remote_repository", "repository", "upstream", "maintenance_state", "recommended_version", "successor_id", "common_configuration_reference", "runbook_reference", "role", "authoritative_reference", "superseded_by", "steps_reference", "stop_condition_reference", "rollback_reference", "verification_method", "executable_status", "kind", "rationale_reference", "decision_evidence_reference", "gateway_reference", "vpn_reference", "account", "credential_type", "access_reference"}
 	for _, key := range stringFields {

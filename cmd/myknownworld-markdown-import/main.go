@@ -1,5 +1,6 @@
-// myknownworld-markdown-import scans a local Markdown wiki's frontmatter and
-// emits one complete read-only SourceBatch as JSON on stdout.
+// myknownworld-markdown-import scans a local Markdown wiki's modeled
+// frontmatter and safe relative-link relationships, emitting a report as JSON
+// on stdout. It never writes to the graph or stores Markdown body text.
 package main
 
 import (
