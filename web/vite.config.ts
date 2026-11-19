@@ -9,6 +9,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8081', changeOrigin: true },
       '/healthz': { target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8081', changeOrigin: true },
+      '/cmdb': { target: process.env.CMDB_PROXY_TARGET ?? 'http://127.0.0.1:8082', changeOrigin: true, rewrite: path => path.replace(/^\/cmdb/, '') },
     },
   },
 })

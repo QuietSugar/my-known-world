@@ -41,7 +41,7 @@ func main() {
 	}
 	addr := os.Getenv("CMDB_ADDR")
 	if addr == "" {
-		addr = "127.0.0.1:8081"
+		addr = "127.0.0.1:8082"
 	}
 	handler := cmdb.HTTPHandler{Catalog: cmdb.Catalog{Repository: repo}, Authorizer: cmdb.BearerAuthorizer{Token: token}}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
