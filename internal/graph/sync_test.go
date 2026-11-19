@@ -45,6 +45,45 @@ func TestSyncPreviewApplyIsConservativeAndRepeatable(t *testing.T) {
 	}
 }
 
+func TestSyncPreviewSeparatesNewMissingFromAlreadyStale(t *testing.T) {
+	g := New()
+	if err := g.AddNode(Node{ID: "self", Type: Self, Name: "Me", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddNode(Node{ID: "old", Type: Machine, Name: "Old", Source: "inventory", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddNode(Node{ID: "child", Type: Hardware, Name: "Child", Source: "inventory", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddRelation(Relation{ID: "self-old", From: "self", To: "old", Predicate: KnowsAbout, Source: "system:connectivity"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddRelation(Relation{ID: "old-link", From: "old", To: "child", Predicate: RelatedTo, Source: "inventory"}); err != nil {
+		t.Fatal(err)
+	}
+	assertion := FieldAssertion{ID: "old-field", NodeID: "old", FieldPath: "name", ValueHash: HashFieldValue("Old"), Source: "inventory", EvidenceKind: EvidenceDocument, Certainty: CertaintyConfirmed}
+	if err := g.AddAssertion(assertion); err != nil {
+		t.Fatal(err)
+	}
+	empty := SourceBatch{Source: "inventory", Nodes: []Node{}, Relations: []Relation{}, Assertions: []FieldAssertion{}}
+	first := g.PreviewSync(empty)
+	if len(first.NewlyMissingNodes) != 2 || len(first.StaleNodes) != 0 || len(first.NewlyMissingRels) != 1 || len(first.StaleRels) != 0 || len(first.NewlyMissingAssertions) != 1 || len(first.StaleAssertions) != 0 {
+		t.Fatalf("first missing preview did not mark new transitions: %+v", first)
+	}
+	updated, _, err := g.ApplySync(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated := updated.PreviewSync(empty)
+	if len(repeated.NewlyMissingNodes) != 0 || len(repeated.NewlyMissingRels) != 0 || len(repeated.NewlyMissingAssertions) != 0 || len(repeated.StaleNodes) != 2 || len(repeated.StaleRels) != 1 || len(repeated.StaleAssertions) != 1 {
+		t.Fatalf("repeated missing preview did not distinguish already-stale records: %+v", repeated)
+	}
+	if len(repeated.MissingNodes) != 2 || len(repeated.MissingRels) != 1 || len(repeated.MissingAssertions) != 1 {
+		t.Fatalf("legacy missing fields changed: %+v", repeated)
+	}
+}
+
 func TestSyncPreviewDoesNotMutateSubmittedIdentityMappingBatch(t *testing.T) {
 	g := New()
 	_ = g.AddNode(Node{ID: "self", Type: Self, Name: "Me", ModelVersion: 1})
