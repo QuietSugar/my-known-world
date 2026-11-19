@@ -34,6 +34,7 @@ func (a BearerAuthorizer) Authorize(r *http.Request) bool {
 type HTTPHandler struct {
 	Secrets    SecretService
 	Catalog    Catalog
+	Resources  ResourceCatalog
 	Authorizer BearerAuthorizer
 }
 type secretHTTPRequest struct {
@@ -52,6 +53,14 @@ func (h HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.EscapedPath(), "/")
 	if path == "" {
 		path = "/"
+	}
+	if path == "/services" || strings.HasPrefix(path, "/services/") {
+		h.serveResources(w, r, ServiceResource, path)
+		return
+	}
+	if path == "/accounts" || strings.HasPrefix(path, "/accounts/") {
+		h.serveResources(w, r, AccountResource, path)
+		return
 	}
 	if strings.HasPrefix(path, "/environments") {
 		h.serveEnvironment(w, r, path)
@@ -210,4 +219,66 @@ func writeHTTPError(w http.ResponseWriter, status int, message string) {
 func writeSecretJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (h HTTPHandler) serveResources(w http.ResponseWriter, r *http.Request, kind ResourceKind, path string) {
+	base := "/services"
+	if kind == AccountResource {
+		base = "/accounts"
+	}
+	if path == base {
+		switch r.Method {
+		case http.MethodGet:
+			items, err := h.Resources.List(r.Context(), kind)
+			if err != nil {
+				writeHTTPError(w, http.StatusServiceUnavailable, "application catalog unavailable")
+				return
+			}
+			writeSecretJSON(w, http.StatusOK, map[string]any{"items": items})
+		case http.MethodPost:
+			var item Resource
+			if err := decodeSecretBody(w, r, &item); err != nil {
+				writeHTTPError(w, http.StatusBadRequest, "invalid catalog request")
+				return
+			}
+			item.Kind = kind
+			if err := h.Resources.Save(r.Context(), item); err != nil {
+				writeHTTPError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeSecretJSON(w, http.StatusCreated, item)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			writeHTTPError(w, http.StatusMethodNotAllowed, "unsupported method")
+		}
+		return
+	}
+	id, err := url.PathUnescape(strings.TrimPrefix(path, base+"/"))
+	if err != nil || id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var item Resource
+		if err := decodeSecretBody(w, r, &item); err != nil || item.ID != id {
+			writeHTTPError(w, http.StatusBadRequest, "resource ID must match request path")
+			return
+		}
+		item.Kind = kind
+		if err := h.Resources.Save(r.Context(), item); err != nil {
+			writeHTTPError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeSecretJSON(w, http.StatusOK, item)
+	case http.MethodDelete:
+		if err := h.Resources.Remove(r.Context(), kind, id); err != nil {
+			writeHTTPError(w, http.StatusServiceUnavailable, "application catalog unavailable")
+			return
+		}
+		writeSecretJSON(w, http.StatusOK, map[string]string{"deleted": id})
+	default:
+		w.Header().Set("Allow", "PUT, DELETE")
+		writeHTTPError(w, http.StatusMethodNotAllowed, "unsupported method")
+	}
 }

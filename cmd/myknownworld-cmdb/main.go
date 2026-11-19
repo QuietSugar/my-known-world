@@ -43,7 +43,7 @@ func main() {
 	if addr == "" {
 		addr = "127.0.0.1:8082"
 	}
-	handler := cmdb.HTTPHandler{Catalog: cmdb.Catalog{Repository: repo}, Authorizer: cmdb.BearerAuthorizer{Token: token}}
+	handler := cmdb.HTTPHandler{Catalog: cmdb.Catalog{Repository: repo}, Resources: cmdb.ResourceCatalog{Repository: repo}, Authorizer: cmdb.BearerAuthorizer{Token: token}}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe() }()

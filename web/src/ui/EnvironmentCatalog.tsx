@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Plus, RefreshCw, Search, Trash2 } from 'lucide-react'
+import { ResourceCatalog } from './ResourceCatalog'
 
 type Environment={id:string;name:string;description:string;tags:string[];serviceIds:string[];accountIds:string[]}
 const apiRoot='/cmdb/environments'
@@ -12,11 +13,11 @@ export function EnvironmentCatalog(){
  useEffect(()=>{void load()},[load])
  const save=async(e:React.FormEvent)=>{e.preventDefault();try{const payload:Environment={id:form.id.trim(),name:form.name.trim(),description:form.description.trim(),tags:form.tags.split(',').map(x=>x.trim()).filter(Boolean),serviceIds:form.serviceIds.split(',').map(x=>x.trim()).filter(Boolean),accountIds:form.accountIds.split(',').map(x=>x.trim()).filter(Boolean)};await request(apiRoot,token,{method:'POST',body:JSON.stringify(payload)});setForm({id:'',name:'',description:'',tags:'',serviceIds:'',accountIds:''});await load()}catch(e){setError(e instanceof Error?e.message:'保存失败')}}
  const remove=async(id:string)=>{if(!window.confirm(`删除应用目录中的环境“${id}”？`))return;try{await request(`${apiRoot}/${encodeURIComponent(id)}`,token,{method:'DELETE'});await load()}catch(e){setError(e instanceof Error?e.message:'删除失败')}}
- return <section className="panel objects-panel"><div className="panel-head"><div><div className="panel-title">环境目录</div><div className="panel-sub">应用层 CMDB 元数据；与核心图谱分开存储。仅使用 ID 引用对象，不填写秘密。</div></div><button className="text-action" onClick={()=>void load()}><RefreshCw size={14}/> 刷新</button></div>
+ return <><section className="panel objects-panel"><div className="panel-head"><div><div className="panel-title">环境目录</div><div className="panel-sub">应用层 CMDB 元数据；与核心图谱分开存储。仅使用 ID 引用对象，不填写秘密。</div></div><button className="text-action" onClick={()=>void load()}><RefreshCw size={14}/> 刷新</button></div>
  {!token?<div className="catalog-auth"><p>输入独立的 CMDB_APP_TOKEN。令牌只保存在当前浏览器会话。</p><input type="password" value={token} onChange={e=>setToken(e.target.value)} placeholder="CMDB_APP_TOKEN"/><button onClick={()=>{sessionStorage.setItem('mkw-cmdb-token',token);void load()}}>连接目录</button></div>:<>
  {error&&<div className="alert">{error}<button onClick={()=>{setToken('');sessionStorage.removeItem('mkw-cmdb-token')}}>更换令牌</button></div>}
  <div className="catalog-tools"><label className="search-box"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="按名称、标签或关联 ID 搜索"/></label><span>{busy?'读取中…':`${items.length} 个环境`}</span></div>
  <form className="environment-form" onSubmit={e=>void save(e)}><strong><Plus size={15}/> 新建环境</strong><div className="environment-fields"><input required value={form.id} onChange={e=>setForm({...form,id:e.target.value})} placeholder="唯一 ID"/><input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="名称"/><input value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="描述"/><input value={form.tags} onChange={e=>setForm({...form,tags:e.target.value})} placeholder="标签（逗号分隔）"/><input value={form.serviceIds} onChange={e=>setForm({...form,serviceIds:e.target.value})} placeholder="服务 ID（逗号分隔）"/><input value={form.accountIds} onChange={e=>setForm({...form,accountIds:e.target.value})} placeholder="账户 ID（逗号分隔）"/><button type="submit">保存</button></div></form>
  {items.length?items.map(item=><article className="environment-card" key={item.id}><div><strong>{item.name}</strong><small className="mono">{item.id}</small><p>{item.description||'无描述'}</p><div className="environment-meta">{[...item.tags.map(t=>`#${t}`),...item.serviceIds.map(t=>`服务 · ${t}`),...item.accountIds.map(t=>`账户 · ${t}`)].map((x,i)=><span key={`${x}-${i}`}>{x}</span>)}</div></div><button className="icon-button" aria-label="删除环境" onClick={()=>void remove(item.id)}><Trash2 size={16}/></button></article>):<div className="empty-note">目录为空，或没有匹配结果。</div>}
- </>}</section>
+ </>}</section>{token&&<ResourceCatalog token={token}/>}</>
 }

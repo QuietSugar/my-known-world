@@ -26,6 +26,10 @@ func (r PostgresEnvironmentRepository) EnsureSchema(ctx context.Context) error {
 		account_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
 		updated_at timestamptz NOT NULL DEFAULT now()
 	)`)
+	if err != nil {
+		return err
+	}
+	_, err = r.DB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS cmdb_app_resources (id text NOT NULL, kind text NOT NULL CHECK(kind IN ('service','account')), name text NOT NULL, description text NOT NULL DEFAULT '', environment_ids jsonb NOT NULL DEFAULT '[]'::jsonb, credential_ref text NOT NULL DEFAULT '', updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(kind,id))`)
 	return err
 }
 func (r PostgresEnvironmentRepository) List(ctx context.Context) ([]Environment, error) {
@@ -84,5 +88,50 @@ func (r PostgresEnvironmentRepository) Delete(ctx context.Context, id string) er
 		return errors.New("environment database is not configured")
 	}
 	_, err := r.DB.ExecContext(ctx, `DELETE FROM cmdb_app_environments WHERE id=$1`, id)
+	return err
+}
+
+func (r PostgresEnvironmentRepository) ListResources(ctx context.Context, kind ResourceKind) ([]Resource, error) {
+	if r.DB == nil {
+		return nil, errors.New("resource database is not configured")
+	}
+	rows, err := r.DB.QueryContext(ctx, `SELECT id,kind,name,description,environment_ids,credential_ref FROM cmdb_app_resources WHERE kind=$1 ORDER BY id`, string(kind))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Resource{}
+	for rows.Next() {
+		var item Resource
+		var envs []byte
+		if err := rows.Scan(&item.ID, &item.Kind, &item.Name, &item.Description, &envs, &item.CredentialRef); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(envs, &item.EnvironmentIDs); err != nil {
+			return nil, errors.New("stored environment memberships are invalid")
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+func (r PostgresEnvironmentRepository) PutResource(ctx context.Context, item Resource) error {
+	if r.DB == nil {
+		return errors.New("resource database is not configured")
+	}
+	envs, err := json.Marshal(item.EnvironmentIDs)
+	if err != nil {
+		return err
+	}
+	_, err = r.DB.ExecContext(ctx, `INSERT INTO cmdb_app_resources(id,kind,name,description,environment_ids,credential_ref,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,now()) ON CONFLICT(kind,id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,environment_ids=EXCLUDED.environment_ids,credential_ref=EXCLUDED.credential_ref,updated_at=now()`, item.ID, string(item.Kind), item.Name, item.Description, string(envs), item.CredentialRef)
+	return err
+}
+func (r PostgresEnvironmentRepository) DeleteResource(ctx context.Context, kind ResourceKind, id string) error {
+	if r.DB == nil {
+		return errors.New("resource database is not configured")
+	}
+	_, err := r.DB.ExecContext(ctx, `DELETE FROM cmdb_app_resources WHERE kind=$1 AND id=$2`, string(kind), id)
 	return err
 }

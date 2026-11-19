@@ -64,6 +64,28 @@ func TestPostgresEnvironmentRepositoryCRUD(t *testing.T) {
 	if !found {
 		t.Fatal("environment upsert did not update search fields")
 	}
+	resources := ResourceCatalog{Repository: repo}
+	service := Resource{ID: id + "-svc", Kind: ServiceResource, Name: "Synthetic service", EnvironmentIDs: []string{id}, CredentialRef: "opaque-provider-ref"}
+	if err := resources.Save(ctx, service); err != nil {
+		t.Fatal(err)
+	}
+	defer resources.Remove(context.Background(), ServiceResource, service.ID)
+	accounts, err := resources.List(ctx, ServiceResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched := false
+	for _, item := range accounts {
+		if item.ID == service.ID {
+			matched = true
+			if item.CredentialRef != "opaque-provider-ref" {
+				t.Fatalf("credential reference changed: %+v", item)
+			}
+		}
+	}
+	if !matched {
+		t.Fatal("service catalog insert missing")
+	}
 	if err := catalog.Remove(ctx, id); err != nil {
 		t.Fatal(err)
 	}
