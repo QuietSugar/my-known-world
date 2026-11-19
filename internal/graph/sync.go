@@ -60,22 +60,28 @@ type FieldConflict struct {
 }
 
 type SyncPreview struct {
-	ExpectedRevision  string          `json:"expectedRevision,omitempty"`
-	PlanHash          string          `json:"planHash,omitempty"`
-	Source            string          `json:"source"`
-	SourceHash        string          `json:"sourceHash"`
-	ParserVersion     string          `json:"parserVersion,omitempty"`
-	AddedNodes        []string        `json:"addedNodes"`
-	UpdatedNodes      []string        `json:"updatedNodes"`
-	AddedRelations    []string        `json:"addedRelations"`
-	UpdatedRels       []string        `json:"updatedRelations"`
-	MissingNodes      []string        `json:"missingNodes"`
-	MissingRels       []string        `json:"missingRelations"`
-	Conflicts         []string        `json:"conflicts"`
-	AddedAssertions   []string        `json:"addedAssertions"`
-	UpdatedAssertions []string        `json:"updatedAssertions"`
-	MissingAssertions []string        `json:"missingAssertions"`
-	ValueConflicts    []FieldConflict `json:"valueConflicts"`
+	ExpectedRevision       string          `json:"expectedRevision,omitempty"`
+	PlanHash               string          `json:"planHash,omitempty"`
+	Source                 string          `json:"source"`
+	SourceHash             string          `json:"sourceHash"`
+	ParserVersion          string          `json:"parserVersion,omitempty"`
+	AddedNodes             []string        `json:"addedNodes"`
+	UpdatedNodes           []string        `json:"updatedNodes"`
+	AddedRelations         []string        `json:"addedRelations"`
+	UpdatedRels            []string        `json:"updatedRelations"`
+	MissingNodes           []string        `json:"missingNodes"`
+	NewlyMissingNodes      []string        `json:"newlyMissingNodes"`
+	StaleNodes             []string        `json:"alreadyStaleNodes"`
+	MissingRels            []string        `json:"missingRelations"`
+	NewlyMissingRels       []string        `json:"newlyMissingRelations"`
+	StaleRels              []string        `json:"alreadyStaleRelations"`
+	Conflicts              []string        `json:"conflicts"`
+	AddedAssertions        []string        `json:"addedAssertions"`
+	UpdatedAssertions      []string        `json:"updatedAssertions"`
+	MissingAssertions      []string        `json:"missingAssertions"`
+	NewlyMissingAssertions []string        `json:"newlyMissingAssertions"`
+	StaleAssertions        []string        `json:"alreadyStaleAssertions"`
+	ValueConflicts         []FieldConflict `json:"valueConflicts"`
 }
 
 func canonicalizeBatch(batch SourceBatch) (SourceBatch, error) {
@@ -135,7 +141,7 @@ func batchHash(batch SourceBatch) string {
 // changing either. IDs are the source's stable identity mapping.
 func (g *Graph) PreviewSync(batch SourceBatch) SyncPreview {
 	source := strings.TrimSpace(batch.Source)
-	p := SyncPreview{Source: source, ParserVersion: batch.ParserVersion, SourceHash: batch.SourceHash, AddedNodes: []string{}, UpdatedNodes: []string{}, AddedRelations: []string{}, UpdatedRels: []string{}, MissingNodes: []string{}, MissingRels: []string{}, Conflicts: []string{}, AddedAssertions: []string{}, UpdatedAssertions: []string{}, MissingAssertions: []string{}, ValueConflicts: []FieldConflict{}}
+	p := SyncPreview{Source: source, ParserVersion: batch.ParserVersion, SourceHash: batch.SourceHash, AddedNodes: []string{}, UpdatedNodes: []string{}, AddedRelations: []string{}, UpdatedRels: []string{}, MissingNodes: []string{}, NewlyMissingNodes: []string{}, StaleNodes: []string{}, MissingRels: []string{}, NewlyMissingRels: []string{}, StaleRels: []string{}, Conflicts: []string{}, AddedAssertions: []string{}, UpdatedAssertions: []string{}, MissingAssertions: []string{}, NewlyMissingAssertions: []string{}, StaleAssertions: []string{}, ValueConflicts: []FieldConflict{}}
 	if p.SourceHash == "" {
 		p.SourceHash = batchHash(batch)
 	}
@@ -257,19 +263,34 @@ func (g *Graph) PreviewSync(batch SourceBatch) SyncPreview {
 	for id, a := range g.assertions {
 		if a.Source == source && !assertionIDs[id] {
 			p.MissingAssertions = append(p.MissingAssertions, id)
+			if a.Certainty == CertaintyStale {
+				p.StaleAssertions = append(p.StaleAssertions, id)
+			} else {
+				p.NewlyMissingAssertions = append(p.NewlyMissingAssertions, id)
+			}
 		}
 	}
 	for id, n := range g.nodes {
 		if n.Source == source && n.Type != Self && !nodeIDs[id] {
 			p.MissingNodes = append(p.MissingNodes, id)
+			if n.Certainty == CertaintyStale {
+				p.StaleNodes = append(p.StaleNodes, id)
+			} else {
+				p.NewlyMissingNodes = append(p.NewlyMissingNodes, id)
+			}
 		}
 	}
 	for id, r := range g.relations {
 		if r.Source == source && !relationIDs[id] {
 			p.MissingRels = append(p.MissingRels, id)
+			if r.Certainty == CertaintyStale {
+				p.StaleRels = append(p.StaleRels, id)
+			} else {
+				p.NewlyMissingRels = append(p.NewlyMissingRels, id)
+			}
 		}
 	}
-	for _, ids := range [][]string{p.AddedNodes, p.UpdatedNodes, p.AddedRelations, p.UpdatedRels, p.MissingNodes, p.MissingRels, p.Conflicts, p.AddedAssertions, p.UpdatedAssertions, p.MissingAssertions} {
+	for _, ids := range [][]string{p.AddedNodes, p.UpdatedNodes, p.AddedRelations, p.UpdatedRels, p.MissingNodes, p.NewlyMissingNodes, p.StaleNodes, p.MissingRels, p.NewlyMissingRels, p.StaleRels, p.Conflicts, p.AddedAssertions, p.UpdatedAssertions, p.MissingAssertions, p.NewlyMissingAssertions, p.StaleAssertions} {
 		sort.Strings(ids)
 	}
 	return p
