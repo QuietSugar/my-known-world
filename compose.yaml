@@ -57,7 +57,7 @@ services:
 
   cmdb:
     image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.0.10}
-    command: ["/usr/local/bin/myknownworld-cmdb"]
+    entrypoint: ["/sbin/tini", "--", "/usr/local/bin/myknownworld-cmdb"]
     environment:
       CMDB_ADDR: 0.0.0.0:8082
       CMDB_DATABASE_URL: postgresql://myknownworld:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/myknownworld?sslmode=disable
