@@ -3,13 +3,17 @@ package materialize
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
 	"github.com/QuietSugar/my-known-world/internal/importer"
 	yaml "github.com/goccy/go-yaml"
 )
+
+func timePtr(value time.Time) *time.Time { return &value }
 
 func TestExportWritesDeterministicSafeCopiesAndRefusesOverwrite(t *testing.T) {
 	g := graph.New()
@@ -49,7 +53,7 @@ func TestExportWritesDeterministicSafeCopiesAndRefusesOverwrite(t *testing.T) {
 
 func TestExportProducesImporterConfigForSupportedRoundTrip(t *testing.T) {
 	g := graph.New()
-	n := graph.Node{ID: "stable-service-id", Type: graph.SoftwareInstance, Name: "Round trip service", Lifecycle: "stopped", Source: "fixture", ModelVersion: 1, SoftwareInstance: &graph.SoftwareInstanceDetails{Domains: []string{"roundtrip.example.test"}, Ports: []int{8443}, DeploymentPath: "/srv/app", OperationalState: "stopped"}}
+	n := graph.Node{ID: "stable-service-id", Type: graph.SoftwareInstance, Name: "Round trip service", Lifecycle: "stopped", Source: "fixture", ModelVersion: 1, SoftwareInstance: &graph.SoftwareInstanceDetails{ProductName: "Example", Domains: []string{"roundtrip.example.test"}, Ports: []int{8443}, DeploymentPath: "/srv/app", DeploymentMethod: "container", RuntimeIdentity: "app-user", Endpoints: []graph.Endpoint{{Kind: "https", Address: "roundtrip.example.test", Port: 8443}}, ConfigurationReferences: []string{"safe://config-ref"}, DeploymentState: "deployed", OperationalState: "stopped", MaintenanceState: "maintained", VerificationResult: "passed", VerifiedAt: timePtr(time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC))}}
 	if err := g.AddNode(n); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +77,7 @@ func TestExportProducesImporterConfigForSupportedRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected round-trip source batch: %+v", report.Batch)
 	}
 	got := report.Batch.Nodes[0]
-	if got.Name != n.Name || got.Lifecycle != n.Lifecycle || got.SoftwareInstance == nil || got.SoftwareInstance.DeploymentPath != n.SoftwareInstance.DeploymentPath || len(got.SoftwareInstance.Domains) != 1 || got.SoftwareInstance.Domains[0] != n.SoftwareInstance.Domains[0] || len(got.SoftwareInstance.Ports) != 1 || got.SoftwareInstance.Ports[0] != 8443 {
+	if got.Name != n.Name || got.Lifecycle != n.Lifecycle || !reflect.DeepEqual(got.SoftwareInstance, n.SoftwareInstance) {
 		t.Fatalf("unexpected structured round trip: %+v", got)
 	}
 }
@@ -109,8 +113,23 @@ func TestExportMaterializesSupportedRelationsAndStableIdentityMappings(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "instances:") || !strings.Contains(string(body), "../SoftwareInstance/") {
+	if !strings.Contains(string(body), "predicate: hasInstance") || !strings.Contains(string(body), "../SoftwareInstance/") || !strings.Contains(string(body), "id: instance-edge") {
 		t.Fatalf("supported relation missing from frontmatter: %s", body)
+	}
+	configBytes, err := os.ReadFile(filepath.Join(root, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config importer.MarkdownConfig
+	if err := yaml.Unmarshal(configBytes, &config); err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := importer.MarkdownFrontmatter(root, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roundTrip.Batch.Relations) != 1 || roundTrip.Batch.Relations[0].ID != "instance-edge" || roundTrip.Batch.Relations[0].Predicate != graph.HasInstance {
+		t.Fatalf("relation was not round-tripped: %+v", roundTrip.Batch.Relations)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
 	yaml "github.com/goccy/go-yaml"
@@ -30,16 +31,21 @@ type IdentityMapping struct {
 	NodeID   string `yaml:"nodeId" json:"nodeId"`
 }
 type ManifestNode struct {
-	ID        string          `yaml:"id" json:"id"`
-	Type      graph.NodeType  `yaml:"type" json:"type"`
-	Certainty graph.Certainty `yaml:"certainty" json:"certainty"`
-	Path      string          `yaml:"path" json:"path"`
+	ID           string             `yaml:"id" json:"id"`
+	Type         graph.NodeType     `yaml:"type" json:"type"`
+	Lifecycle    string             `yaml:"lifecycle,omitempty" json:"lifecycle,omitempty"`
+	EvidenceKind graph.EvidenceKind `yaml:"evidenceKind" json:"evidenceKind"`
+	Certainty    graph.Certainty    `yaml:"certainty" json:"certainty"`
+	Path         string             `yaml:"path" json:"path"`
 }
 type ManifestRelation struct {
-	ID        string          `yaml:"id" json:"id"`
-	From      string          `yaml:"from" json:"from"`
-	Predicate graph.Predicate `yaml:"predicate" json:"predicate"`
-	To        string          `yaml:"to" json:"to"`
+	ID           string             `yaml:"id" json:"id"`
+	From         string             `yaml:"from" json:"from"`
+	Predicate    graph.Predicate    `yaml:"predicate" json:"predicate"`
+	To           string             `yaml:"to" json:"to"`
+	EvidenceKind graph.EvidenceKind `yaml:"evidenceKind" json:"evidenceKind"`
+	Certainty    graph.Certainty    `yaml:"certainty" json:"certainty"`
+	RecordedAt   time.Time          `yaml:"recordedAt" json:"recordedAt"`
 }
 type Report struct {
 	Unsupported []string `yaml:"unsupported" json:"unsupported"`
@@ -67,9 +73,10 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 	}
 	manifest := Manifest{Version: 1, Nodes: []ManifestNode{}, IdentityMappings: []IdentityMapping{}, Relations: []ManifestRelation{}}
 	fileOutputs := map[string][]byte{}
-	report := Report{Unsupported: []string{"Original Markdown bodies were not stored and cannot be recovered.", "History, assertion hashes, and evidence values are not materialized.", "Not every typed model field is currently mapped by the Markdown importer; this export is not yet a complete round trip (see layered-adapters documentation)."}}
+	report := Report{Unsupported: []string{"Original Markdown bodies were not stored and cannot be recovered.", "History, assertion hashes, and evidence values are not materialized.", "Some provenance/model metadata (source identity, model version, evidence references, timestamps, and non-confirmed certainty) is not restored by the Markdown importer; see manifest.yaml and this report."}}
 	nodes := g.Nodes()
 	nodePaths := map[string]string{}
+	nodeTypes := map[string]graph.NodeType{}
 	for _, n := range nodes {
 		if options.Source != "" && n.Source != options.Source {
 			continue
@@ -79,6 +86,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 		}
 		path := nodePath(n.ID, n.Type)
 		nodePaths[n.ID] = path
+		nodeTypes[n.ID] = n.Type
 	}
 	for _, n := range nodes {
 		path, selected := nodePaths[n.ID]
@@ -86,7 +94,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 			continue
 		}
 		relations := g.Relations()
-		content, unsupported, err := renderNode(n, path, nodePaths, relations)
+		content, unsupported, err := renderNode(n, path, nodePaths, nodeTypes, relations)
 		if err != nil {
 			return Manifest{}, Report{}, fmt.Errorf("render %s: %w", n.ID, err)
 		}
@@ -100,7 +108,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 			report.Unsupported = append(report.Unsupported, n.ID+": certainty "+string(n.Certainty)+" is descriptive only; current Markdown importer cannot restore it")
 		}
 		fileOutputs[path] = content
-		manifest.Nodes = append(manifest.Nodes, ManifestNode{ID: n.ID, Type: n.Type, Certainty: n.Certainty, Path: path})
+		manifest.Nodes = append(manifest.Nodes, ManifestNode{ID: n.ID, Type: n.Type, Lifecycle: n.Lifecycle, EvidenceKind: n.EvidenceKind, Certainty: n.Certainty, Path: path})
 		manifest.IdentityMappings = append(manifest.IdentityMappings, IdentityMapping{SourceID: path, NodeID: n.ID})
 	}
 	for _, r := range g.Relations() {
@@ -110,7 +118,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 		if _, to := nodePaths[r.To]; !to {
 			continue
 		}
-		manifest.Relations = append(manifest.Relations, ManifestRelation{ID: r.ID, From: r.From, Predicate: r.Predicate, To: r.To})
+		manifest.Relations = append(manifest.Relations, ManifestRelation{ID: r.ID, From: r.From, Predicate: r.Predicate, To: r.To, EvidenceKind: r.EvidenceKind, Certainty: r.Certainty, RecordedAt: r.RecordedAt})
 	}
 	sort.Slice(manifest.Nodes, func(i, j int) bool { return manifest.Nodes[i].ID < manifest.Nodes[j].ID })
 	sort.Slice(manifest.IdentityMappings, func(i, j int) bool {
@@ -230,13 +238,13 @@ func unique(in []string) []string {
 	}
 	return out
 }
-func renderNode(n graph.Node, currentPath string, paths map[string]string, relations []graph.Relation) ([]byte, []string, error) {
+func renderNode(n graph.Node, currentPath string, paths map[string]string, nodeTypes map[string]graph.NodeType, relations []graph.Relation) ([]byte, []string, error) {
 	if looksLikeSecretValue(n.Name) || looksLikeSecretValue(n.Lifecycle) {
 		return nil, nil, fmt.Errorf("node %s has secret-like identity or lifecycle content; refusing materialization", n.ID)
 	}
 	fields := map[string]any{"id": n.ID, "type": sourceType(n), "name": n.Name}
 	if n.Lifecycle != "" {
-		fields["status"] = n.Lifecycle
+		fields["lifecycle"] = n.Lifecycle
 	}
 	unsupported := []string{}
 	// Marshal only modeled detail structs; node provenance/evidence references and hashes are not copied.
@@ -255,27 +263,32 @@ func renderNode(n graph.Node, currentPath string, paths map[string]string, relat
 			fields[snakeCase(k)] = clean
 		}
 	}
+	materializedRelations := []map[string]string{}
 	for _, r := range relations {
-		key, target := "", ""
-		switch {
-		case r.Predicate == graph.Hosts && r.To == n.ID:
-			key, target = "host", r.From
-		case r.Predicate == graph.HasInstance && r.From == n.ID && n.Type == graph.Product:
-			key, target = "instances", r.To
-		case r.Predicate == graph.RelatedTo && r.From == n.ID && n.Type == graph.WorkItem:
-			key, target = "related", r.To
-		case r.From == n.ID || r.To == n.ID:
-			unsupported = append(unsupported, "relation requires an unsupported Markdown reference mapping: "+string(r.Predicate)+" (see manifest.yaml)")
+		direction, target := "", ""
+		if r.From == n.ID {
+			direction, target = "out", r.To
+		} else if r.To == n.ID {
+			direction, target = "in", r.From
+		} else {
+			continue
 		}
-		if key != "" {
-			if targetPath, ok := paths[target]; ok {
-				rel, err := filepath.Rel(filepath.Dir(currentPath), targetPath)
-				if err != nil {
-					return nil, nil, err
-				}
-				fields[key] = appendString(fields[key], filepath.ToSlash(rel))
-			}
+		if _, ok := paths[target]; !ok {
+			continue
 		}
+		if !markdownTypeSupported(n.Type) || !markdownTypeSupported(nodeTypes[target]) {
+			unsupported = append(unsupported, "relation to unsupported node type retained only in manifest.yaml: "+string(r.Predicate))
+			continue
+		}
+		targetPath := paths[target]
+		relative, err := filepath.Rel(filepath.Dir(currentPath), targetPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		materializedRelations = append(materializedRelations, map[string]string{"id": r.ID, "predicate": string(r.Predicate), "direction": direction, "target": filepath.ToSlash(relative)})
+	}
+	if len(materializedRelations) > 0 {
+		fields["relations"] = materializedRelations
 	}
 	if n.Type == graph.AccountCredential {
 		unsupported = append(unsupported, "credential-provider values are never materialized; only non-secret metadata is eligible")
