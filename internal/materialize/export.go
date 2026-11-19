@@ -112,13 +112,19 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 		manifest.IdentityMappings = append(manifest.IdentityMappings, IdentityMapping{SourceID: path, NodeID: n.ID})
 	}
 	for _, r := range g.Relations() {
-		if _, from := nodePaths[r.From]; !from {
+		_, from := nodePaths[r.From]
+		_, to := nodePaths[r.To]
+		if from && to {
+			manifest.Relations = append(manifest.Relations, ManifestRelation{ID: r.ID, From: r.From, Predicate: r.Predicate, To: r.To, EvidenceKind: r.EvidenceKind, Certainty: r.Certainty, RecordedAt: r.RecordedAt})
 			continue
 		}
-		if _, to := nodePaths[r.To]; !to {
-			continue
+		if from || to {
+			missing := r.To
+			if to {
+				missing = r.From
+			}
+			report.Unsupported = append(report.Unsupported, fmt.Sprintf("relation %s (%s) omitted because endpoint %s was excluded by export filters", r.ID, r.Predicate, missing))
 		}
-		manifest.Relations = append(manifest.Relations, ManifestRelation{ID: r.ID, From: r.From, Predicate: r.Predicate, To: r.To, EvidenceKind: r.EvidenceKind, Certainty: r.Certainty, RecordedAt: r.RecordedAt})
 	}
 	sort.Slice(manifest.Nodes, func(i, j int) bool { return manifest.Nodes[i].ID < manifest.Nodes[j].ID })
 	sort.Slice(manifest.IdentityMappings, func(i, j int) bool {

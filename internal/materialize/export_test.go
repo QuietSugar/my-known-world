@@ -82,6 +82,29 @@ func TestExportProducesImporterConfigForSupportedRoundTrip(t *testing.T) {
 	}
 }
 
+func TestExportReportsRelationsDroppedByExportFilters(t *testing.T) {
+	g := graph.New()
+	a := graph.Node{ID: "selected", Type: graph.Product, Name: "Selected", Source: "fixture", ModelVersion: 1}
+	b := graph.Node{ID: "excluded", Type: graph.SoftwareInstance, Name: "Excluded", Source: "fixture", ModelVersion: 1}
+	if err := g.AddNode(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddNode(b); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddRelation(graph.Relation{ID: "cross-filter-edge", From: a.ID, Predicate: graph.HasInstance, To: b.ID, Source: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	_, report, err := Export(filepath.Join(t.TempDir(), "filtered"), g, Options{Types: map[graph.NodeType]bool{graph.Product: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(report.Unsupported, "\\n")
+	if !strings.Contains(joined, "cross-filter-edge") || !strings.Contains(joined, "excluded by export filters") {
+		t.Fatalf("filtered relation omission not reported: %v", report.Unsupported)
+	}
+}
+
 func TestExportMaterializesSupportedRelationsAndStableIdentityMappings(t *testing.T) {
 	g := graph.New()
 	product := graph.Node{ID: "product-id", Type: graph.Product, Name: "Synthetic product", Source: "fixture", ModelVersion: 1, Product: &graph.ProductDetails{Purpose: "fixture"}}
