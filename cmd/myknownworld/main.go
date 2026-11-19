@@ -5,8 +5,11 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -74,6 +77,23 @@ func main() {
 		log.Fatalf("configure read-only MCP: %v", err)
 	}
 	mux.Handle("/mcp", mcpHandler)
+	if target := os.Getenv("CMDB_PROXY_TARGET"); target != "" {
+		upstream, err := url.Parse(target)
+		if err != nil || upstream.Scheme == "" || upstream.Host == "" {
+			log.Fatal("CMDB_PROXY_TARGET must be an absolute HTTP URL")
+		}
+		proxy := httputil.NewSingleHostReverseProxy(upstream)
+		original := proxy.Director
+		proxy.Director = func(req *http.Request) {
+			original(req)
+			req.URL.Path = strings.TrimPrefix(req.URL.Path, "/cmdb")
+			if req.URL.Path == "" {
+				req.URL.Path = "/"
+			}
+		}
+		mux.Handle("/cmdb/", proxy)
+		mux.Handle("/cmdb", proxy)
+	}
 	if root := os.Getenv("WEB_ROOT"); root != "" {
 		mux.Handle("/", webui.Handler{Root: root})
 	} else {

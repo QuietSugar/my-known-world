@@ -47,6 +47,10 @@ func (h HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.URL.Path == "/healthz" && r.Method == http.MethodGet {
+		writeSecretJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 	if !h.Authorizer.Authorize(r) {
 		writeHTTPError(w, http.StatusUnauthorized, "authorized application access required")
 		return
