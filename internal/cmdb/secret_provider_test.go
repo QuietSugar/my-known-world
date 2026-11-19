@@ -61,6 +61,9 @@ func TestSecretServiceAuthorizesIndependentlyAndDelegatesLifecycle(t *testing.T)
 		}
 		if action == CreateSecret || action == UpdateSecret || action == RotateSecret {
 			req.Value = []byte("synthetic-only")
+			if action == CreateSecret {
+				req.Name = "test-account"
+			}
 		}
 		if _, err := service.Execute(context.Background(), action, ref, req); err != nil {
 			t.Fatalf("%s: %v", action, err)
