@@ -236,13 +236,23 @@ jobs:
           if expected not in tags:
               sys.exit(f"release archive is missing {expected}; docker load + default Compose would fail")
           PY
-      - name: Create tester release
+      - name: Determine release channel
+        id: channel
+        run: |
+          # A VERSION with a suffix (0.2.0-rc.1) marks a pre-release; a plain
+          # version such as 0.1.0 marks an official release.
+          if [[ "$(cat VERSION)" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: MyKnownWorld ${{ github.ref_name }}
           body_path: docs/release-${{ github.ref_name }}.md
-          prerelease: true
+          prerelease: ${{ steps.channel.outputs.prerelease }}
           files: |
             release-assets/my-known-world-image.tar
             release-assets/my-known-world-image.tar.sha256
