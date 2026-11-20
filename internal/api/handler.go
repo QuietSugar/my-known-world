@@ -223,9 +223,72 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case path == "/api/nodes":
-		writeJSON(w, http.StatusOK, map[string]any{"items": g.Nodes()})
+		q := r.URL.Query()
+		if len(q) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{"items": g.Nodes()})
+			return
+		}
+		view := q.Get("view")
+		if view != "" && view != "summary" && view != "full" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid view parameter; must be 'summary' or 'full'")
+			return
+		}
+		allNodes := g.Nodes()
+		page, total, hasMore, nextCursor, err := paginateSlice(allNodes, func(n graph.Node) string { return n.ID }, q)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		w.Header().Set("X-Total-Count", strconv.Itoa(total))
+		if nextCursor != "" {
+			w.Header().Set("X-Next-Cursor", nextCursor)
+		}
+		var resultItems any = page
+		if view == "summary" {
+			summaries := make([]graph.NodeSummary, len(page))
+			for i, n := range page {
+				summaries[i] = n.Summary()
+			}
+			resultItems = summaries
+		}
+		resp := map[string]any{
+			"items":      resultItems,
+			"totalCount": total,
+			"count":      len(page),
+			"hasMore":    hasMore,
+		}
+		if nextCursor != "" {
+			resp["nextCursor"] = nextCursor
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
 	case path == "/api/relations":
-		writeJSON(w, http.StatusOK, map[string]any{"items": g.Relations()})
+		q := r.URL.Query()
+		if len(q) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{"items": g.Relations()})
+			return
+		}
+		allRels := g.Relations()
+		page, total, hasMore, nextCursor, err := paginateSlice(allRels, func(r graph.Relation) string { return r.ID }, q)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		w.Header().Set("X-Total-Count", strconv.Itoa(total))
+		if nextCursor != "" {
+			w.Header().Set("X-Next-Cursor", nextCursor)
+		}
+		resp := map[string]any{
+			"items":      page,
+			"totalCount": total,
+			"count":      len(page),
+			"hasMore":    hasMore,
+		}
+		if nextCursor != "" {
+			resp["nextCursor"] = nextCursor
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
 	case path == "/api/impact":
 		writeJSON(w, http.StatusOK, map[string]any{"items": g.ImpactFromSelf()})
 	case path == "/api/provisionals":
@@ -992,4 +1055,62 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+const MaxPageLimit = 500
+
+func paginateSlice[T any](items []T, getID func(T) string, values url.Values) ([]T, int, bool, string, error) {
+	total := len(items)
+	limitStr := values.Get("limit")
+	offsetStr := values.Get("offset")
+	cursor := values.Get("cursor")
+
+	limit := total
+	if limitStr != "" {
+		parsedLimit, err := strconv.Atoi(limitStr)
+		if err != nil || parsedLimit <= 0 {
+			return nil, 0, false, "", errors.New("limit must be a positive integer")
+		}
+		if parsedLimit > MaxPageLimit {
+			return nil, 0, false, "", fmt.Errorf("limit cannot exceed %d", MaxPageLimit)
+		}
+		limit = parsedLimit
+	}
+
+	startIdx := 0
+	if cursor != "" {
+		found := false
+		for i, it := range items {
+			if getID(it) > cursor {
+				startIdx = i
+				found = true
+				break
+			}
+		}
+		if !found {
+			startIdx = total
+		}
+	} else if offsetStr != "" {
+		parsedOffset, err := strconv.Atoi(offsetStr)
+		if err != nil || parsedOffset < 0 {
+			return nil, 0, false, "", errors.New("offset must be a non-negative integer")
+		}
+		startIdx = parsedOffset
+		if startIdx > total {
+			startIdx = total
+		}
+	}
+
+	endIdx := startIdx + limit
+	if endIdx > total {
+		endIdx = total
+	}
+
+	page := items[startIdx:endIdx]
+	hasMore := endIdx < total
+	nextCursor := ""
+	if hasMore && len(page) > 0 {
+		nextCursor = getID(page[len(page)-1])
+	}
+	return page, total, hasMore, nextCursor, nil
 }

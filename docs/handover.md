@@ -69,16 +69,17 @@ maintainer needs to decide is listed under "Open work" and "Owner-only actions".
 
 ## Open work, in priority order
 
-1. **Backup and restore are documented but not engineered** (issue #46). There is no
-   restore script and no restore drill in CI. This is the top risk for real data:
-   `pg_dump -Fc` guidance exists, a tested restore path does not.
-2. **The write API has no update or delete** (issue #47). Changing or removing an
-   object still goes through the preview-then-apply editor; scripting clients need two
-   calls. A `PATCH`/`DELETE` pair (optimistic `expectedRevision`, same token) is the
-   natural next feature.
-3. **`/api/nodes` returns the whole graph** (issue #48). No pagination or projection.
-   This is the first thing that will hurt on a large graph; a `limit`/`cursor` plus a
-   summary-only projection would be a contained change.
+1. **[DELIVERED] Backup and restore are documented and engineered** (issue #46, closed).
+   Delivered verified `scripts/backup.sh`, `scripts/restore.sh`, and `scripts/verify_restore.py`,
+   with a fully automated restore drill step in CI and operator runbook `docs/backup-and-restore.md`.
+2. **[DELIVERED] The write API supports update and delete** (issue #47, closed).
+   Direct `PATCH /api/write/nodes/{id}`, `DELETE /api/write/nodes/{id}`, `PATCH /api/write/relations/{id}`,
+   and `DELETE /api/write/relations/{id}` with optimistic revision locking, referential integrity
+   protection, and undoable audit operation history.
+3. **[DELIVERED] Paged read API and summary projection** (issue #48, closed).
+   Added `limit` (max 500), stable ID-based `cursor`, and `offset` to `/api/nodes` and `/api/relations`,
+   along with `view=summary` projection aligning with MCP `graph_query`, and internal paged streaming
+   in `myknownworld-materialize`. Full forward compatibility preserved for unparameterized queries.
 4. **Single write token, no identity, no metrics.** No per-user authorization and
    no Prometheus/structured operational metrics. Both are architecture-level.
 5. **CMDB and graph entities are still unlinked** (deferred with #32).

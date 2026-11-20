@@ -71,15 +71,7 @@ type QueryInput struct {
 	Text         string             `json:"text,omitempty"`
 	Count        int                `json:"count,omitempty"`
 }
-type NodeSummary struct {
-	ID           string             `json:"id"`
-	Type         graph.NodeType     `json:"type"`
-	Name         string             `json:"name"`
-	Lifecycle    string             `json:"lifecycle,omitempty"`
-	Source       string             `json:"source"`
-	EvidenceKind graph.EvidenceKind `json:"evidenceKind"`
-	Certainty    graph.Certainty    `json:"certainty"`
-}
+type NodeSummary = graph.NodeSummary
 type QueryOutput struct {
 	Items []NodeSummary `json:"items"`
 	Count int           `json:"count"`
@@ -108,7 +100,7 @@ func (s *Server) query(ctx context.Context, _ *mcp.CallToolRequest, in QueryInpu
 		if needle != "" && !matchesNodeText(n, needle) {
 			continue
 		}
-		out.Items = append(out.Items, NodeSummary{ID: n.ID, Type: n.Type, Name: n.Name, Lifecycle: n.Lifecycle, Source: n.Source, EvidenceKind: n.EvidenceKind, Certainty: n.Certainty})
+		out.Items = append(out.Items, n.Summary())
 		if len(out.Items) >= in.Count {
 			break
 		}

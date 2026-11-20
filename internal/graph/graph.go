@@ -60,6 +60,28 @@ type Node struct {
 	Network            *NetworkDetails           `json:"network,omitempty"`
 }
 
+type NodeSummary struct {
+	ID           string       `json:"id"`
+	Type         NodeType     `json:"type"`
+	Name         string       `json:"name"`
+	Lifecycle    string       `json:"lifecycle,omitempty"`
+	Source       string       `json:"source"`
+	EvidenceKind EvidenceKind `json:"evidenceKind"`
+	Certainty    Certainty    `json:"certainty"`
+}
+
+func (n Node) Summary() NodeSummary {
+	return NodeSummary{
+		ID:           n.ID,
+		Type:         n.Type,
+		Name:         n.Name,
+		Lifecycle:    n.Lifecycle,
+		Source:       n.Source,
+		EvidenceKind: n.EvidenceKind,
+		Certainty:    n.Certainty,
+	}
+}
+
 type Predicate string
 
 const (

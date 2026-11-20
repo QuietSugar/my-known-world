@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +17,10 @@ import (
 	"github.com/QuietSugar/my-known-world/internal/materialize"
 )
 
-type items[T any] struct {
-	Items []T `json:"items"`
+type pagedResponse[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor string `json:"nextCursor,omitempty"`
+	HasMore    bool   `json:"hasMore,omitempty"`
 }
 
 func main() {
@@ -41,24 +44,27 @@ func main() {
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	g := graph.New()
-	var nodeResponse items[graph.Node]
-	if err := getJSON(client, *api, *token, "/api/nodes", &nodeResponse); err != nil {
+
+	nodes, err := fetchAllPaged[graph.Node](client, *api, *token, "/api/nodes")
+	if err != nil {
 		fail(err)
 	}
-	for _, n := range nodeResponse.Items {
+	for _, n := range nodes {
 		if err := g.AddNode(n); err != nil {
 			fail(fmt.Errorf("invalid node in read API response: %w", err))
 		}
 	}
-	var relationResponse items[graph.Relation]
-	if err := getJSON(client, *api, *token, "/api/relations", &relationResponse); err != nil {
+
+	relations, err := fetchAllPaged[graph.Relation](client, *api, *token, "/api/relations")
+	if err != nil {
 		fail(err)
 	}
-	for _, r := range relationResponse.Items {
+	for _, r := range relations {
 		if err := g.AddRelation(r); err != nil {
 			fail(fmt.Errorf("invalid relation in read API response: %w", err))
 		}
 	}
+
 	selected := map[graph.NodeType]bool{}
 	for _, raw := range strings.Split(*types, ",") {
 		if raw = strings.TrimSpace(raw); raw != "" {
@@ -71,6 +77,29 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "materialized %d nodes, %d relations; %d unsupported-data notes\n", len(manifest.Nodes), len(manifest.Relations), len(report.Unsupported))
 }
+
+func fetchAllPaged[T any](client *http.Client, base, token, route string) ([]T, error) {
+	var all []T
+	cursor := ""
+	const pageSize = 200
+	for {
+		pagedRoute := fmt.Sprintf("%s?limit=%d", route, pageSize)
+		if cursor != "" {
+			pagedRoute += "&cursor=" + url.QueryEscape(cursor)
+		}
+		var page pagedResponse[T]
+		if err := getJSON(client, base, token, pagedRoute, &page); err != nil {
+			return nil, err
+		}
+		all = append(all, page.Items...)
+		if !page.HasMore || page.NextCursor == "" || len(page.Items) == 0 {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	return all, nil
+}
+
 func getJSON(client *http.Client, base, token, route string, target any) error {
 	request, err := http.NewRequest(http.MethodGet, strings.TrimRight(base, "/")+route, nil)
 	if err != nil {
