@@ -18,11 +18,11 @@ services:
     networks: [backend]
 
   app:
-    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.1.0}
+    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.1.1}
     build:
       context: .
       args:
-        VERSION: ${IMAGE_VERSION:-0.1.0}
+        VERSION: ${IMAGE_VERSION:-0.1.1}
     environment:
       ADDR: :8080
       WEB_ROOT: /app/web
@@ -56,7 +56,7 @@ services:
     networks: [backend]
 
   cmdb:
-    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.1.0}
+    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.1.1}
     entrypoint: ["/sbin/tini", "--", "/usr/local/bin/myknownworld-cmdb"]
     environment:
       CMDB_ADDR: 0.0.0.0:8082

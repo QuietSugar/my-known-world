@@ -2,8 +2,8 @@
 
 Short version: `master` is green, there are no open issues or pull requests, and
 the repository has a single branch (`master`). The last published artifact is the
-official `v0.1.0` release. Anything a new maintainer needs to decide is listed
-under "Open work" and "Owner-only actions".
+official `v0.1.1` patch release on top of `v0.1.0`. Anything a new maintainer needs
+to decide is listed under "Open work" and "Owner-only actions".
 
 ## Where things stand
 
@@ -14,12 +14,9 @@ under "Open work" and "Owner-only actions".
   reason (`not planned` items explain what would make them reviewable).
 - Branches: only `master`. Old working branches were merged or superseded first,
   then deleted.
-- Release: `v0.1.0`, published as a normal (non-pre-release) release with
-  `my-known-world-image.tar` plus `.sha256`, pullable from GHCR.
-
-Known caveat about the published `v0.1.0` image: the MCP `initialize` handshake
-reports `serverInfo.version: "0.0.7"` (issue #40). The fix is on `master`; it
-reaches users with the next build or release.
+- Release: `v0.1.1`, published as a normal (non-pre-release) release with
+  `my-known-world-image.tar` plus `.sha256`, pullable from GHCR. It supersedes
+  `v0.1.0`, which reported a hardcoded `serverInfo.version` in the MCP handshake.
 
 ## What is delivered and working
 
@@ -117,15 +114,14 @@ Release procedure (see `.github/workflows/ci.yml`):
   gets `403 Resource not accessible by integration`. To enable branch
   auto-deletion: *Settings → General → "Automatically delete head branches"*.
   Consider also requiring the `test` and `web` checks on `master`.
-- **Decide on a `v0.1.1`.** Issues #40 and #41 are fixed on `master` but not in
-  any published artifact. A patch release is ~10 minutes of work (bump, note, tag)
-  whenever you want those in users' hands.
 - **Real data and credentials.** Keep write tokens, CMDB tokens, vault keys, real
   graph snapshots, and internal addresses out of this repository. The demo graph
   that a fresh install seeds is synthetic on purpose.
 
 ## Where to read next
 
+- `docs/release-v0.1.1.md` — the current patch release (version metadata, sync
+  preview fix, container CLI docs).
 - `docs/release-v0.1.0.md` — what shipped, install, upgrade, limitations.
 - `docs/write-api.md` — the create/batch contract, errors, limits.
 - `docs/read-only-mcp.md` — MCP tools and their guarantees.
