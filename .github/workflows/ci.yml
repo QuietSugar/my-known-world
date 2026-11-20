@@ -101,6 +101,7 @@ jobs:
           sed -i 's/replace-with-a-long-random-password/ci-only-url-safe-password-1234567890/' .env
           sed -i -E 's/^IMAGE_TAG=.*/IMAGE_TAG=ci/' .env
           sed -i "s|CMDB_APP_TOKEN=.*|CMDB_APP_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env
+          sed -i "s|MYKNOWNWORLD_WRITE_TOKEN=.*|MYKNOWNWORLD_WRITE_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')|" .env
           sed -i 's/CMDB_SECRET_PROVIDER=/CMDB_SECRET_PROVIDER=file/' .env
           sed -i "s|CMDB_VAULT_KEY_BASE64=.*|CMDB_VAULT_KEY_BASE64=$(python3 -c 'import secrets,base64; print(base64.b64encode(secrets.token_bytes(32)).decode())')|" .env
       - name: Start Compose stack
@@ -144,6 +145,10 @@ jobs:
           python3 scripts/cmdb_smoke_test.py --base-url http://127.0.0.1:8080 --token "$cmdb_token"
       - name: Test bundled web UI
         run: curl --fail --silent http://127.0.0.1:8080/ | grep -q 'MyKnownWorld'
+      - name: Test the create API
+        run: |
+          write_token="$(sed -n 's/^MYKNOWNWORLD_WRITE_TOKEN=//p' .env)"
+          python3 scripts/write_api_smoke_test.py --base-url http://127.0.0.1:8080 --token "$write_token"
       - name: Verify the runtime image bundles the documented commands
         run: |
           for command in myknownworld myknownworld-mcp myknownworld-markdown-import myknownworld-cmdb myknownworld-materialize; do

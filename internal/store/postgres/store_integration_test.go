@@ -698,3 +698,76 @@ func TestManualMutationPreviewRequiresMatchingRevisionAndPayload(t *testing.T) {
 		t.Fatal("disconnecting mutation should fail during preview")
 	}
 }
+
+func TestApplyCreateBatchIsAtomicRecordedAndRevisionChecked(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	store := openTestStore(t)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base := graph.New()
+	_ = base.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
+	if err := store.SaveSnapshot(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := base.Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := graph.CreateBatch{
+		Nodes: []graph.CreateNodeRequest{
+			{Node: graph.Node{ID: "host-c", Type: graph.Machine, Name: "Host C", ModelVersion: 1, Source: "api-test"}},
+			{Node: graph.Node{ID: "project-c", Type: graph.SoftwareProject, Name: "Project C", ModelVersion: 1, Source: "api-test"}},
+		},
+		Relations: []graph.Relation{{ID: "depends-c", From: "project-c", Predicate: graph.DependsOn, To: "host-c", Source: "api-test"}},
+	}
+	result, applied, err := store.ApplyCreateBatch(ctx, batch, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.NodeIDs) != 2 || len(result.RelationIDs) != 3 {
+		t.Fatalf("result: %+v", result)
+	}
+	if applied == revision || applied == "" {
+		t.Fatalf("revision was not advanced: %q", applied)
+	}
+	loaded, err := store.LoadSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Node("host-c"); !ok {
+		t.Fatal("batch node missing")
+	}
+	history, err := store.EntityHistory(ctx, "node", "host-c", 10)
+	if err != nil || len(history) == 0 || history[0].Action != "created" {
+		t.Fatalf("history not recorded: %+v %v", history, err)
+	}
+	// A second batch prepared against the old revision must be rejected whole.
+	stale := graph.CreateBatch{Nodes: []graph.CreateNodeRequest{{Node: graph.Node{ID: "host-d", Type: graph.Machine, Name: "Host D", ModelVersion: 1}}}}
+	if _, _, err = store.ApplyCreateBatch(ctx, stale, revision); err == nil {
+		t.Fatal("stale revision was accepted")
+	}
+	loaded, err = store.LoadSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Node("host-d"); ok {
+		t.Fatal("rejected batch modified the graph")
+	}
+	// The recorded operation must be undoable like any other write.
+	operations, err := store.MutationOperations(ctx, 5)
+	if err != nil || len(operations) == 0 || operations[0].Action != "manual:createBatch" {
+		t.Fatalf("operation not recorded: %+v %v", operations, err)
+	}
+	if err = store.UndoOperation(ctx, operations[0].ID); err != nil {
+		t.Fatalf("undo: %v", err)
+	}
+	loaded, err = store.LoadSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Node("host-c"); ok {
+		t.Fatal("undo did not remove the batch nodes")
+	}
+}
