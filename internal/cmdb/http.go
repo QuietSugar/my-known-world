@@ -215,6 +215,8 @@ func writeSecretServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrUnavailable):
 		writeHTTPError(w, http.StatusServiceUnavailable, "secret provider unavailable")
+	case errors.Is(err, ErrSecretUnavailable):
+		writeHTTPError(w, http.StatusNotFound, "secret unavailable")
 	default:
 		writeHTTPError(w, http.StatusBadGateway, "secret operation failed")
 	}

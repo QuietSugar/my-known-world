@@ -39,7 +39,7 @@ def main():
     try:
         call(args.base_url, args.token, f"/cmdb/credentials/{ref}")
     except RuntimeError as exc:
-        if "HTTP 502" in str(exc):
+        if "HTTP 404" in str(exc):
             print("CMDB synthetic credential lifecycle checks passed (create/read/update/rotate/disable)")
             return
         raise
