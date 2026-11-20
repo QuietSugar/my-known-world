@@ -1,4 +1,9 @@
-# Layered adapter work (Issues #32 and #33)
+# Layered adapter work (Issues #32 and #33 — closed as not planned)
+
+Issues #32 and #33 were closed as not planned for the 0.x line; the reasoning and
+the minimal slice that would make each one reviewable are recorded in those issue
+threads. What follows documents the behaviour that is shipped and supported today,
+and remains the reference if layered adapters are ever reopened.
 
 This is an implementation in progress. PostgreSQL remains authoritative. No watcher, automatic Git operation, or reverse synchronization is introduced.
 
