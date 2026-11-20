@@ -23,10 +23,10 @@ type ProviderOptions struct {
 	Directory string
 	Key       []byte
 	KeyFile   string
-	// Remotely supplied provider settings.
-	URL                string
-	Token              string
-	AllowPlaintextHTTP bool
+	// Operator-supplied secret service settings.
+	URL               string
+	Token             string
+	AllowInsecureHTTP bool
 }
 
 // NewSecretProvider builds the configured provider. It returns (nil, nil) when
@@ -57,13 +57,13 @@ func NewSecretProvider(opts ProviderOptions) (SecretProvider, error) {
 		return &FileVault{Dir: opts.Directory, Key: append([]byte(nil), key...)}, nil
 	case ProviderHTTP:
 		provider := &HTTPSecretProvider{
-			BaseURL:            strings.TrimSpace(opts.URL),
-			Token:              opts.Token,
-			AllowPlaintextHTTP: opts.AllowPlaintextHTTP,
+			BaseURL:           strings.TrimSpace(opts.URL),
+			Token:             opts.Token,
+			AllowInsecureHTTP: opts.AllowInsecureHTTP,
 		}
 		// Validate configuration eagerly so a bad endpoint fails at startup
 		// rather than on the first credential request.
-		if _, err := provider.endpoint("/v1/secrets"); err != nil {
+		if _, err := provider.endpoint("/secrets"); err != nil {
 			return nil, err
 		}
 		return provider, nil

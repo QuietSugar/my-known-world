@@ -92,9 +92,9 @@ func providerOptionsFromEnvironment() cmdb.ProviderOptions {
 		Directory: strings.TrimSpace(os.Getenv("CMDB_VAULT_DIR")),
 	}
 	if opts.Kind != cmdb.ProviderFile {
-		opts.URL = strings.TrimSpace(os.Getenv("CMDB_SECRET_PROVIDER_URL"))
-		opts.Token = os.Getenv("CMDB_SECRET_PROVIDER_TOKEN")
-		opts.AllowPlaintextHTTP = os.Getenv("CMDB_SECRET_PROVIDER_ALLOW_HTTP") == "1"
+		opts.URL = strings.TrimSpace(os.Getenv("CMDB_SECRET_HTTP_URL"))
+		opts.Token = os.Getenv("CMDB_SECRET_HTTP_TOKEN")
+		opts.AllowInsecureHTTP = os.Getenv("CMDB_SECRET_HTTP_ALLOW_INSECURE") == "1"
 		return opts
 	}
 	key, keyFile, err := cmdb.VaultKeyFromEnvironment(os.Getenv("CMDB_VAULT_KEY_BASE64"), os.Getenv("CMDB_VAULT_KEY_FILE"))

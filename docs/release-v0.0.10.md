@@ -9,6 +9,16 @@ This is a **pre-release for functional testing and feedback**, not a production-
 3. Start the preview with `docker compose up -d`. Open `http://localhost:8080`, choose **CMDB 环境目录**, and enter the CMDB application token. Try synthetic environment, service, and account entries. The account credential reference field is an opaque reference only; never paste a real secret there.
 4. Secret lifecycle API routes (`POST /cmdb/credentials`, `GET|PUT /cmdb/credentials/{ref}`, `POST /cmdb/credentials/{ref}/rotate`, and `POST /cmdb/credentials/{ref}/disable`) are available only when the file provider is enabled. Use disposable synthetic values only; the CMDB bearer token is required.
 
+## Known issue in this archive
+
+The `my-known-world-image.tar` attached to v0.0.10 contains only the `ci` image tag, while `.env.example` defaults to `IMAGE_TAG=v0.0.10`. After `docker load`, either set `IMAGE_TAG=ci` in `.env` or retag:
+
+```sh
+docker tag ghcr.io/quietsugar/my-known-world:ci ghcr.io/quietsugar/my-known-world:v0.0.10
+```
+
+Later releases tag the archive with the release version, and CI now verifies both the archive tag and anonymous pullability of the published GHCR tag (issue #37).
+
 ## Scope and limitations
 
 - The file vault is encrypted with AES-256-GCM and intended for single-process local development/functional testing. It is not a managed, shared, or production vault. There is no production provider integration or fine-grained per-user authorization yet.

@@ -34,9 +34,11 @@ type SecretResult struct {
 	Value    []byte
 }
 
-// SecretProvider is implemented by a separately configured provider (for example,
-// a Vaultwarden-compatible adapter). Values are returned only to the authorized
-// caller and must never be copied into graph records, history, logs, or exports.
+// SecretProvider is implemented by a separately configured provider: the
+// built-in file provider, the generic HTTP provider that talks to an
+// operator-supplied secret service, or a compiled-in implementation. Values are
+// returned only to the authorized caller and must never be copied into graph
+// records, history, logs, or exports.
 type SecretProvider interface {
 	Create(context.Context, SecretRequest) (Metadata, error)
 	Read(context.Context, string) (SecretResult, error)

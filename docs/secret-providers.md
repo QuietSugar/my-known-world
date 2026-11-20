@@ -62,9 +62,9 @@ where it can enforce them, and are obligations of the provider where it cannot.
 | `CMDB_VAULT_DIR` | File provider store directory, owner-only. |
 | `CMDB_VAULT_KEY_BASE64` | File provider key: 32 random bytes, Base64. |
 | `CMDB_VAULT_KEY_FILE` | File provider key file (owner-only). Alternative to the variable above; not both. |
-| `CMDB_SECRET_PROVIDER_URL` | `http` provider base URL. `https` required; `http` only with the opt-in below. |
-| `CMDB_SECRET_PROVIDER_TOKEN` | `http` provider bearer credential, at least 32 characters. |
-| `CMDB_SECRET_PROVIDER_ALLOW_HTTP` | Set to `1` to allow plaintext HTTP for loopback testing only. |
+| `CMDB_SECRET_HTTP_URL` | Base URL of your secret service, e.g. `https://secrets.internal` or `http://127.0.0.1:9000` for a loopback sidecar. |
+| `CMDB_SECRET_HTTP_TOKEN` | Bearer credential for that service, at least 32 characters. |
+| `CMDB_SECRET_HTTP_ALLOW_INSECURE` | Set to `1` to permit plaintext HTTP to a non-loopback host. Loopback endpoints need no opt-in. |
 
 Unknown values fail at startup instead of silently disabling credential
 operations.
@@ -139,38 +139,44 @@ those with your own provider when you need them.
 
 ### Option A — HTTP provider protocol (any language)
 
-Set `CMDB_SECRET_PROVIDER=http` and point `CMDB_SECRET_PROVIDER_URL` at your
-service. The adapter is `internal/cmdb.HTTPSecretProvider`; the wire protocol is:
+This is the recommended integration point: the repository stays vendor-neutral
+and knows nothing about the service behind the endpoint. Any Vaultwarden,
+HashiCorp Vault, KeePass, cloud KMS, or a small local daemon can satisfy it.
 
 ```
-POST   {base}/v1/secrets               {"name":"...","value":"<base64>"}      -> 2xx {"metadata":{...}}
-GET    {base}/v1/secrets/{ref}                                                -> 200 {"metadata":{...},"value":"<base64>"}
-PUT    {base}/v1/secrets/{ref}         {"name":"...","value":"<base64>"}      -> 2xx {"metadata":{...}}
-POST   {base}/v1/secrets/{ref}/rotate  {"name":"...","value":"<base64>"}      -> 2xx {"metadata":{...}}
-POST   {base}/v1/secrets/{ref}/disable                                        -> 2xx {"metadata":{...}}
+POST   {base}/secrets               {"name":"...","value":"..."}   -> {"id":"...","ref":"..."}
+GET    {base}/secrets/{id}                                        -> {"value":"..."}
+PUT    {base}/secrets/{id}          {"value":"..."}                -> {"status":"ok"}
+POST   {base}/secrets/{id}/rotate   {"value":"..."}                -> {"status":"ok"}
+DELETE {base}/secrets/{id}                                        -> {"status":"ok"}
 ```
 
-`metadata` is `{"provider": "...", "opaqueId": "...", "accessReference": "...",
-"rotationAt": "...", "status": "..."}` where only `provider` and `opaqueId` are
-required. Values are Base64 so any language can implement the server.
+`id` is the opaque reference stored by the application. `ref` is optional and
+becomes the recorded access reference. Values are UTF-8 text; the adapter
+refuses non-UTF-8 bytes instead of letting JSON encoding corrupt them.
+Responses may additionally include a `metadata` object
+(`{"provider","opaqueId","accessReference","rotationAt","status"}`); its
+`provider` name then replaces the default `http`, and `rotationAt` is used when
+the provider reports it. A provider that reports no metadata still works: the
+adapter records `active`/`rotated`/`disabled` itself and timestamps confirmed
+rotations.
 
-Adapter behavior an implementation must match:
+Requirements the adapter enforces:
 
-- `Authorization: Bearer <CMDB_SECRET_PROVIDER_TOKEN>` on every request, over
-  TLS. Plaintext HTTP is refused unless `CMDB_SECRET_PROVIDER_ALLOW_HTTP=1`,
-  which exists for loopback testing only.
+- `Authorization: Bearer <CMDB_SECRET_HTTP_TOKEN>` on every request over TLS.
+  Plaintext HTTP is accepted only for a loopback endpoint, or with the explicit
+  `CMDB_SECRET_HTTP_ALLOW_INSECURE=1` opt-in.
 - Redirects are not followed, so the credential is never forwarded to another
   origin.
-- Responses are bounded (256 KiB) and strictly validated: the returned
-  `opaqueId` must equal the requested reference, metadata must be non-secret
-  and CR/LF-free, and values must be 1 byte to 64 KiB.
+- Responses are bounded (256 KiB) and validated: references must be non-empty,
+  at most 2048 bytes and CR/LF-free; values must be 1 byte to 64 KiB; optional
+  metadata must be non-secret and bounded.
 - Status mapping: `404`/`410` → secret unavailable (`404` to callers);
   `401`/`403` → application credential rejected; any other non-2xx, transport
   error, or malformed body → provider unavailable (`503`). Provider response
   bodies are never echoed to callers or logs.
-- Idempotency: `disable` on an already-disabled reference should succeed and
-  return the tombstone; `update`/`rotate` on an unknown or disabled reference
-  should return `404`.
+- Idempotency: `DELETE` on an already-disabled reference should succeed;
+  `PUT`/`rotate` on an unknown or disabled reference should return `404`.
 
 ### Option B — compiled-in Go provider
 

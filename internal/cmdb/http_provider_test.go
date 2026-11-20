@@ -2,7 +2,6 @@ package cmdb
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,20 +12,20 @@ import (
 
 const testProviderToken = "0123456789abcdef0123456789abcdef"
 
-// fakeRemoteProvider implements the documented provider protocol so the
-// adapter can be exercised without any real secret service.
-type fakeRemoteProvider struct {
+// fakeSecretService implements the documented generic contract so the adapter
+// can be exercised without any real secret service.
+type fakeSecretService struct {
 	values    map[string]string
 	seenAuth  []string
 	seenPaths []string
 }
 
-func (f *fakeRemoteProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *fakeSecretService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.seenAuth = append(f.seenAuth, r.Header.Get("Authorization"))
 	f.seenPaths = append(f.seenPaths, r.Method+" "+r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	switch {
-	case r.Method == http.MethodPost && r.URL.Path == "/v1/secrets":
+	case r.Method == http.MethodPost && r.URL.Path == "/secrets":
 		var body httpProviderRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -34,46 +33,41 @@ func (f *fakeRemoteProvider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.values["opaque-1"] = body.Value
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"metadata": Metadata{Provider: "remote", OpaqueID: "opaque-1", Status: "active"}})
-	case r.Method == http.MethodGet:
-		value, ok := f.values[strings.TrimPrefix(r.URL.Path, "/v1/secrets/")]
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "opaque-1", "ref": "gw://opaque-1"})
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/secrets/"):
+		value, ok := f.values[strings.TrimPrefix(r.URL.Path, "/secrets/")]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(httpProviderSecret{Metadata: Metadata{Provider: "remote", OpaqueID: strings.TrimPrefix(r.URL.Path, "/v1/secrets/")}, Value: value})
-	case r.Method == http.MethodPut || strings.HasSuffix(r.URL.Path, "/rotate"):
+		_ = json.NewEncoder(w).Encode(map[string]string{"value": value})
+	case (r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/secrets/")) || (r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rotate")):
 		var body httpProviderRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		f.values["opaque-1"] = body.Value
-		meta := Metadata{Provider: "remote", OpaqueID: "opaque-1", Status: "active"}
-		if strings.HasSuffix(r.URL.Path, "/rotate") {
-			meta.Status = "rotated"
-			meta.RotationAt = "2026-01-01T00:00:00Z"
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"metadata": meta})
-	case strings.HasSuffix(r.URL.Path, "/disable"):
-		_ = json.NewEncoder(w).Encode(map[string]any{"metadata": Metadata{Provider: "remote", OpaqueID: "opaque-1", Status: "disabled"}})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/secrets/"):
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
 }
 
-func TestHTTPProviderImplementsTheDocumentedLifecycle(t *testing.T) {
-	fake := &fakeRemoteProvider{values: map[string]string{}}
+func TestHTTPProviderImplementsTheGenericContract(t *testing.T) {
+	fake := &fakeSecretService{values: map[string]string{}}
 	server := httptest.NewServer(fake)
 	defer server.Close()
-	provider := &HTTPSecretProvider{BaseURL: server.URL, Token: testProviderToken, AllowPlaintextHTTP: true}
+	provider := &HTTPSecretProvider{BaseURL: server.URL, Token: testProviderToken}
 	ctx := context.Background()
 	meta, err := provider.Create(ctx, SecretRequest{Name: "synthetic", Value: []byte("synthetic-secret")})
-	if err != nil || meta.OpaqueID != "opaque-1" || meta.Provider != "remote" {
+	if err != nil || meta.OpaqueID != "opaque-1" || meta.Provider != "http" || meta.AccessReference != "gw://opaque-1" {
 		t.Fatalf("create: %+v %v", meta, err)
 	}
-	if fake.values["opaque-1"] != base64.StdEncoding.EncodeToString([]byte("synthetic-secret")) {
-		t.Fatalf("value was not base64 encoded on the wire: %q", fake.values["opaque-1"])
+	if fake.values["opaque-1"] != "synthetic-secret" {
+		t.Fatalf("value was not forwarded as text: %q", fake.values["opaque-1"])
 	}
 	got, err := provider.Read(ctx, "opaque-1")
 	if err != nil || string(got.Value) != "synthetic-secret" {
@@ -83,7 +77,7 @@ func TestHTTPProviderImplementsTheDocumentedLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	rotated, err := provider.Rotate(ctx, "opaque-1", SecretRequest{Value: []byte("rotated")})
-	if err != nil || rotated.RotationAt == "" {
+	if err != nil || rotated.RotationAt == "" || rotated.Status != "rotated" {
 		t.Fatalf("rotate: %+v %v", rotated, err)
 	}
 	disabled, err := provider.Disable(ctx, "opaque-1")
@@ -95,25 +89,63 @@ func TestHTTPProviderImplementsTheDocumentedLifecycle(t *testing.T) {
 			t.Fatalf("provider credential not forwarded: %q", header)
 		}
 	}
-	expected := []string{"POST /v1/secrets", "GET /v1/secrets/opaque-1", "PUT /v1/secrets/opaque-1", "POST /v1/secrets/opaque-1/rotate", "POST /v1/secrets/opaque-1/disable"}
+	expected := []string{
+		"POST /secrets",
+		"GET /secrets/opaque-1",
+		"PUT /secrets/opaque-1",
+		"POST /secrets/opaque-1/rotate",
+		"DELETE /secrets/opaque-1",
+	}
 	if strings.Join(fake.seenPaths, ",") != strings.Join(expected, ",") {
 		t.Fatalf("unexpected protocol paths: %v", fake.seenPaths)
+	}
+}
+
+func TestHTTPProviderAcceptsOptionalProviderMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`{"id":"opaque-2","metadata":{"provider":"hashicorp-vault","opaqueId":"opaque-2","status":"active"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"value":"synthetic","metadata":{"provider":"hashicorp-vault","opaqueId":"opaque-2"}}`))
+	}))
+	defer server.Close()
+	provider := &HTTPSecretProvider{BaseURL: server.URL, Token: testProviderToken}
+	meta, err := provider.Create(context.Background(), SecretRequest{Name: "synthetic", Value: []byte("synthetic")})
+	if err != nil || meta.Provider != "hashicorp-vault" {
+		t.Fatalf("provider metadata was ignored: %+v %v", meta, err)
+	}
+	result, err := provider.Read(context.Background(), "opaque-2")
+	if err != nil || result.Metadata.Provider != "hashicorp-vault" || string(result.Value) != "synthetic" {
+		t.Fatalf("read: %+v %v", result.Metadata, err)
 	}
 }
 
 func TestHTTPProviderRejectsUnsafeConfiguration(t *testing.T) {
 	ctx := context.Background()
 	cases := []*HTTPSecretProvider{
-		{BaseURL: "http://127.0.0.1:9", Token: testProviderToken},
+		{BaseURL: "http://provider.example", Token: testProviderToken},
 		{BaseURL: "https://provider.example", Token: "short"},
 		{BaseURL: "https://user:pass@provider.example", Token: testProviderToken},
 		{BaseURL: "https://provider.example/?tenant=1", Token: testProviderToken},
 		{BaseURL: "not-a-url", Token: testProviderToken},
+		{BaseURL: "ftp://provider.example", Token: testProviderToken},
 	}
 	for _, provider := range cases {
 		if _, err := provider.Read(ctx, "opaque-1"); err == nil {
 			t.Fatalf("unsafe provider configuration was accepted: %q", provider.BaseURL)
 		}
+	}
+	// Loopback sidecars work without an opt-in; remote plaintext needs one.
+	if provider := (&HTTPSecretProvider{BaseURL: "http://127.0.0.1:9", Token: testProviderToken}); func() bool {
+		_, err := provider.endpoint("/secrets")
+		return err != nil
+	}() {
+		t.Fatal("loopback http endpoint was rejected")
+	}
+	if _, err := (&HTTPSecretProvider{BaseURL: "http://provider.example", Token: testProviderToken, AllowInsecureHTTP: true}).endpoint("/secrets"); err != nil {
+		t.Fatalf("explicit insecure opt-in failed: %v", err)
 	}
 }
 
@@ -124,15 +156,14 @@ func TestHTTPProviderFailuresStayGenericAndNeverLeakValues(t *testing.T) {
 		status  int
 		body    string
 		wantErr error
-		allowed bool
 	}{
 		{name: "missing", status: http.StatusNotFound, body: leaked, wantErr: ErrSecretUnavailable},
 		{name: "gone", status: http.StatusGone, body: leaked, wantErr: ErrSecretUnavailable},
 		{name: "downtime", status: http.StatusServiceUnavailable, body: leaked, wantErr: ErrUnavailable},
 		{name: "unauthorized", status: http.StatusUnauthorized, body: leaked},
 		{name: "invalid-json", status: http.StatusOK, body: leaked},
-		{name: "empty-metadata", status: http.StatusOK, body: `{"metadata":{},"value":"c2VjcmV0"}`},
-		{name: "canned", status: http.StatusOK, body: `{"metadata":{"provider":"remote","opaqueId":"other"},"value":"c2VjcmV0"}`},
+		{name: "empty-value", status: http.StatusOK, body: `{"value":""}`},
+		{name: "unsafe-reference", status: http.StatusOK, body: `{"id":"bad\nref"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,18 +172,30 @@ func TestHTTPProviderFailuresStayGenericAndNeverLeakValues(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer server.Close()
-			provider := &HTTPSecretProvider{BaseURL: server.URL, Token: testProviderToken, AllowPlaintextHTTP: true}
-			_, err := provider.Read(context.Background(), "opaque-1")
+			provider := &HTTPSecretProvider{BaseURL: server.URL, Token: testProviderToken}
+			var err error
+			if tc.name == "unsafe-reference" {
+				_, err = provider.Create(context.Background(), SecretRequest{Name: "synthetic", Value: []byte("synthetic")})
+			} else {
+				_, err = provider.Read(context.Background(), "opaque-1")
+			}
 			if err == nil {
 				t.Fatal("provider failure was not surfaced")
 			}
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Fatalf("error %v does not match %v", err, tc.wantErr)
 			}
-			if strings.Contains(err.Error(), leaked) || strings.Contains(err.Error(), "c2VjcmV0") {
+			if strings.Contains(err.Error(), leaked) {
 				t.Fatalf("provider error leaked secret material: %v", err)
 			}
 		})
+	}
+}
+
+func TestHTTPProviderRejectsNonUTF8Values(t *testing.T) {
+	provider := &HTTPSecretProvider{BaseURL: "https://provider.example", Token: testProviderToken}
+	if _, err := provider.Create(context.Background(), SecretRequest{Name: "binary", Value: []byte{0xff, 0xfe, 0xfd}}); err == nil {
+		t.Fatal("non-UTF-8 value was accepted for a text protocol")
 	}
 }
 
@@ -169,7 +212,7 @@ func TestHTTPProviderDoesNotFollowRedirectsWithItsCredential(t *testing.T) {
 		http.Redirect(w, &http.Request{}, target.URL, http.StatusTemporaryRedirect)
 	}))
 	defer redirector.Close()
-	provider := &HTTPSecretProvider{BaseURL: redirector.URL, Token: testProviderToken, AllowPlaintextHTTP: true}
+	provider := &HTTPSecretProvider{BaseURL: redirector.URL, Token: testProviderToken}
 	if _, err := provider.Read(context.Background(), "opaque-1"); err == nil {
 		t.Fatal("redirected provider response was accepted")
 	}

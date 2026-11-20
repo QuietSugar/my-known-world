@@ -30,8 +30,11 @@ func TestNewSecretProviderSelectsOnlyConfiguredProviders(t *testing.T) {
 	if _, err = NewSecretProvider(ProviderOptions{Kind: ProviderKind("vaultwarden")}); err == nil {
 		t.Fatal("unknown provider kind was accepted")
 	}
-	if _, err = NewSecretProvider(ProviderOptions{Kind: ProviderHTTP, URL: "http://127.0.0.1:9", Token: testProviderToken}); err == nil {
-		t.Fatal("plaintext HTTP provider was accepted without opt-in")
+	if _, err = NewSecretProvider(ProviderOptions{Kind: ProviderHTTP, URL: "http://provider.example", Token: testProviderToken}); err == nil {
+		t.Fatal("plaintext remote HTTP provider was accepted without opt-in")
+	}
+	if _, err = NewSecretProvider(ProviderOptions{Kind: ProviderHTTP, URL: "http://127.0.0.1:9000", Token: testProviderToken}); err != nil {
+		t.Fatalf("loopback sidecar endpoint was rejected: %v", err)
 	}
 	if _, err = NewSecretProvider(ProviderOptions{Kind: ProviderHTTP, URL: "https://provider.example", Token: "short"}); err == nil {
 		t.Fatal("provider with an unsafe token was accepted")
