@@ -513,10 +513,11 @@ func mergeIdentityMappings(ctx context.Context, tx *sql.Tx, batch graph.SourceBa
 		}
 		byID[m.SourceID] = m.NodeID
 	}
-	batch.IdentityMappings = batch.IdentityMappings[:0]
+	merged := make([]graph.IdentityMapping, 0, len(byID))
 	for sourceID, nodeID := range byID {
-		batch.IdentityMappings = append(batch.IdentityMappings, graph.IdentityMapping{SourceID: sourceID, NodeID: nodeID})
+		merged = append(merged, graph.IdentityMapping{SourceID: sourceID, NodeID: nodeID})
 	}
+	batch.IdentityMappings = merged
 	return batch, nil
 }
 
