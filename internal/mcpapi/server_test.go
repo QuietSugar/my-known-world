@@ -3,6 +3,7 @@ package mcpapi
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -31,7 +32,7 @@ func testGraph() *graph.Graph {
 }
 func TestMCPStreamableHTTPToolsAreTypedReadOnlyAndMatchGraphSemantics(t *testing.T) {
 	g := testGraph()
-	handler, err := NewHandler(func(context.Context) (*graph.Graph, error) { return g.Clone(), nil }, historyFixture{})
+	handler, err := NewHandler("0.1.0", func(context.Context) (*graph.Graph, error) { return g.Clone(), nil }, historyFixture{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,4 +143,44 @@ func containsAll(s string, needles ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestHandshakeAdvertisesInjectedImplementationVersion(t *testing.T) {
+	g := testGraph()
+	handler, err := NewHandler("0.1.0", func(context.Context) (*graph.Graph, error) { return g.Clone(), nil }, historyFixture{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	info := session.InitializeResult().ServerInfo
+	if info == nil || info.Name != "my-known-world" || info.Version != "0.1.0" {
+		t.Fatalf("serverInfo = %+v, want my-known-world 0.1.0", info)
+	}
+}
+
+func TestHandshakeFallsBackToDevForBlankVersion(t *testing.T) {
+	g := testGraph()
+	srv, err := NewServer("", func(context.Context) (*graph.Graph, error) { return g.Clone(), nil }, historyFixture{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if got := session.InitializeResult().ServerInfo.Version; got != "dev" {
+		t.Fatalf("serverInfo.version = %q, want dev fallback", got)
+	}
 }

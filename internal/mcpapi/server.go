@@ -30,15 +30,20 @@ type Server struct {
 	assertions AssertionReader
 }
 
-func NewServer(load GraphLoader, history HistoryReader, assertionReaders ...AssertionReader) (*mcp.Server, error) {
+// NewServer builds the read-only MCP server. implVersion is advertised as
+// serverInfo.version in the initialize handshake; callers pass version.Current().
+func NewServer(implVersion string, load GraphLoader, history HistoryReader, assertionReaders ...AssertionReader) (*mcp.Server, error) {
 	if load == nil {
 		return nil, errors.New("graph loader is required")
+	}
+	if strings.TrimSpace(implVersion) == "" {
+		implVersion = "dev"
 	}
 	s := &Server{load: load, history: history}
 	if len(assertionReaders) > 0 {
 		s.assertions = assertionReaders[0]
 	}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "my-known-world", Version: "0.0.7"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "my-known-world", Version: implVersion}, nil)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_query", Description: "Filter graph node summaries by type, lifecycle, certainty, evidence, hosting machine, and case-insensitive text across safe modeled fields."}, s.query)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_entity", Description: "Get typed node details, direct relations, Self path/category, and value-free assertion metadata."}, s.entity)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_relations", Description: "List direct relations for a node with direction and optional predicate filters."}, s.relations)
@@ -47,8 +52,10 @@ func NewServer(load GraphLoader, history HistoryReader, assertionReaders ...Asse
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_history", Description: "Read append-only history for a node or relation ID."}, s.entityHistory)
 	return srv, nil
 }
-func NewHandler(load GraphLoader, history HistoryReader, assertionReaders ...AssertionReader) (*mcp.StreamableHTTPHandler, error) {
-	srv, err := NewServer(load, history, assertionReaders...)
+
+// NewHandler wraps NewServer in the streamable HTTP transport.
+func NewHandler(implVersion string, load GraphLoader, history HistoryReader, assertionReaders ...AssertionReader) (*mcp.StreamableHTTPHandler, error) {
+	srv, err := NewServer(implVersion, load, history, assertionReaders...)
 	if err != nil {
 		return nil, err
 	}
