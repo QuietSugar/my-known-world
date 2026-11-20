@@ -107,6 +107,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		switch {
+		case path == "/api/write/nodes":
+			h.createNodeAPI(w, r)
+			return
+		case path == "/api/write/relations":
+			h.createRelationAPI(w, r)
+			return
+		case path == "/api/write/batch":
+			h.createBatchAPI(w, r)
+			return
 		case path == "/api/sync/preview":
 			h.preview(w, r)
 			return

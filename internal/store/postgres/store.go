@@ -736,6 +736,65 @@ func (s *Store) ApplyManualMutation(ctx context.Context, mutation graph.ManualMu
 	return plan, nil
 }
 
+// ApplyCreateBatch atomically creates nodes with their Self anchor relations and
+// any additional relations. It records one reversible operation and per-entity
+// history rows, exactly like the guarded manual-mutation path. An empty
+// expectedRevision opts out of the optimistic concurrency check; when it is
+// supplied the whole batch is rejected if the graph moved.
+func (s *Store) ApplyCreateBatch(ctx context.Context, batch graph.CreateBatch, expectedRevision string) (graph.CreateResult, string, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `LOCK TABLE nodes,relations IN ACCESS EXCLUSIVE MODE`); err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	current, err := loadSnapshotTx(ctx, tx)
+	if errors.Is(err, ErrEmptySnapshot) {
+		current = graph.New()
+	} else if err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	revision, err := current.Fingerprint()
+	if err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	if expectedRevision != "" && revision != expectedRevision {
+		return graph.CreateResult{}, "", errors.New("graph changed since this batch was prepared; fetch the current revision and retry")
+	}
+	updated, result, err := current.ApplyCreateBatch(batch)
+	if err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	updated = updated.CanonicalizeTimes()
+	if err = validateSnapshot(updated); err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	if err = saveSnapshotTx(ctx, tx, updated); err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	if err = appendGraphDiff(ctx, tx, nil, "manual:create", current, updated); err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	before, _ := json.Marshal(current.Snapshot())
+	after, _ := json.Marshal(updated.Snapshot())
+	afterHash, err := updated.Fingerprint()
+	if err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action,before_state,after_state,after_hash) VALUES($1,$2,$3,$4)`, "manual:createBatch", before, after, afterHash); err != nil {
+		return graph.CreateResult{}, "", fmt.Errorf("record reversible operation: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE graph_mutation_operations SET before_state='{}'::jsonb,after_state='{}'::jsonb WHERE operation_id NOT IN (SELECT operation_id FROM graph_mutation_operations ORDER BY recorded_at DESC,operation_id DESC LIMIT 50)`); err != nil {
+		return graph.CreateResult{}, "", fmt.Errorf("prune old undo snapshots: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	return result, afterHash, nil
+}
+
 func (s *Store) UpdateNode(ctx context.Context, id string, node graph.Node) error {
 	return s.mutateGraph(ctx, "manual:edit", func(g *graph.Graph) (*graph.Graph, error) { return g.UpdateNode(id, node) })
 }
