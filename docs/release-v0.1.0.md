@@ -5,8 +5,10 @@ were tester previews; start here if you are adopting MyKnownWorld for your own
 graph.
 
 It is still a `0.x` release: the graph formats are stable enough to run with real
-data and backups, but the remaining acceptance work in issues #32 and #33 is not
-finished, and the API may still change in a minor release. PostgreSQL is
+data and backups, but the API may still change in a minor release. Issues #32 and
+#33 were later closed as not planned for this line; the reasoning and the minimal
+slice that would make each one reviewable are recorded on those issues, and
+`docs/handover.md` lists what remains open. PostgreSQL is
 authoritative; Markdown is an explicit import/export format, never a watcher.
 
 ## What you can do with it
@@ -113,11 +115,12 @@ plus a writable output path or mount.
 
 ## Known limitations
 
-- **#32 (CMDB):** services and accounts are not yet linked to core graph
-  entities; the environment → service → account workflow, per-user authorization
-  and provider audit remain open. The built-in file provider is single-host.
-- **#33 (materialization):** only hosting, product instances, and work-item
-  references become Markdown relations; other relations, provenance and history
+- **#32 (CMDB, closed as not planned):** services and accounts are not linked to
+  core graph entities; the environment → service → account workflow, per-user
+  authorization and provider audit remain open. The built-in file provider is
+  single-host.
+- **#33 (materialization, closed as not planned):** only hosting, product
+  instances, and work-item references become Markdown relations; other relations, provenance and history
   are reported as unsupported, and original Markdown bodies were never stored.
 - **MCP version string:** the published v0.1.0 image reports
   `serverInfo.version: "0.0.7"` in the MCP `initialize` handshake; the fix (issue
