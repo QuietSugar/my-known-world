@@ -154,6 +154,54 @@ jobs:
           for command in myknownworld myknownworld-mcp myknownworld-markdown-import myknownworld-cmdb myknownworld-materialize; do
             docker compose exec -T app sh -c "command -v ${command}" > /dev/null
           done
+      - name: Backup and restore drill
+        run: |
+          echo "==> Step 1: Create verified backup"
+          chmod +x scripts/backup.sh scripts/restore.sh scripts/verify_restore.py
+          ./scripts/backup.sh --compose --out-dir /tmp/ci-backups
+
+          dump_file="$(ls /tmp/ci-backups/*.pg_dump | head -n 1)"
+          test -f "$dump_file"
+          test -f "${dump_file%.*}.sha256"
+          test -f "${dump_file%.*}_manifest.json"
+
+          echo "==> Step 2: Prepare secondary database"
+          docker compose exec -T db psql -U myknownworld -d postgres -c "DROP DATABASE IF EXISTS myknownworld_drill;"
+          docker compose exec -T db psql -U myknownworld -d postgres -c "CREATE DATABASE myknownworld_drill OWNER myknownworld;"
+
+          echo "==> Step 3: Restore backup into secondary database"
+          ./scripts/restore.sh --compose --dump "$dump_file" --compose-db myknownworld_drill
+
+          echo "==> Step 4: Run auxiliary app instance connected to restored database"
+          network_name="$(docker network ls --filter name=backend --format '{{.Name}}' | head -n 1)"
+          db_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)"
+          write_token="$(sed -n 's/^MYKNOWNWORLD_WRITE_TOKEN=//p' .env)"
+          docker run -d --name mkw-drill-app \
+            --network "$network_name" \
+            -p 8089:8080 \
+            -e ADDR=:8080 \
+            -e DATABASE_URL="postgresql://myknownworld:${db_password}@db:5432/myknownworld_drill?sslmode=disable" \
+            -e MYKNOWNWORLD_WRITE_TOKEN="$write_token" \
+            -e CMDB_PROXY_TARGET=http://cmdb:8082 \
+            ghcr.io/quietsugar/my-known-world:ci
+
+          status=""
+          for attempt in $(seq 1 30); do
+            status="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8089/healthz || true)"
+            if [ "$status" = "200" ]; then echo "Auxiliary app healthy after ${attempt}s"; break; fi
+            sleep 1
+          done
+          if [ "$status" != "200" ]; then
+            echo "::error::Auxiliary app failed to start"
+            docker logs mkw-drill-app
+            exit 1
+          fi
+
+          echo "==> Step 5: Verify restore fidelity"
+          python3 scripts/verify_restore.py --source-url http://127.0.0.1:8080 --restored-url http://127.0.0.1:8089
+
+          docker rm -f mkw-drill-app
+          docker compose exec -T db psql -U myknownworld -d postgres -c "DROP DATABASE myknownworld_drill;"
       - name: Tear down test stack
         if: always()
         run: docker compose down -v
