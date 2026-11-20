@@ -1,9 +1,10 @@
 # Handover: current state, decisions, and open work
 
-Short version: `master` is green, there are no open issues or pull requests, and
-the repository has a single branch (`master`). The last published artifact is the
-official `v0.1.1` patch release on top of `v0.1.0`. Anything a new maintainer needs
-to decide is listed under "Open work" and "Owner-only actions".
+Short version: `master` is green, there are no open pull requests, the only branch is
+`master`, and the tracker holds three actionable backlog issues (#46 backup/restore
+drill, #47 write `PATCH`/`DELETE`, #48 `/api/nodes` pagination). The last published
+artifact is the official `v0.1.1` patch release on top of `v0.1.0`. Anything a new
+maintainer needs to decide is listed under "Open work" and "Owner-only actions".
 
 ## Where things stand
 
