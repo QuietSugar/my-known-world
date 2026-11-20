@@ -64,7 +64,95 @@ def main():
     )
     require(status == 409, f"stale revision must be rejected, got {status}")
 
-    print("create API checks passed (auth, batch create, read-back, duplicate, dangling relation, stale revision)")
+    # --- PATCH & DELETE DIRECT MUTATIONS (Issue #47) ---
+    rev = created.get("revision")
+
+    # PATCH node with stale revision fails
+    status, _ = call(
+        args.base_url,
+        "/api/write/nodes/ci-write-machine",
+        "PATCH",
+        args.token,
+        {"expectedRevision": "wrong-revision", "node": {"name": "Patched name"}},
+    )
+    require(status == 409, f"stale revision patch must fail with 409, got {status}")
+
+    # PATCH node succeeds
+    status, patched = call(
+        args.base_url,
+        "/api/write/nodes/ci-write-machine",
+        "PATCH",
+        args.token,
+        {"expectedRevision": rev, "node": {"name": "Patched name"}},
+    )
+    require(status == 200, f"patch node failed with {status}: {patched}")
+    require(patched.get("node", {}).get("name") == "Patched name", f"node was not patched: {patched}")
+    rev = patched.get("revision")
+
+    # Read back to ensure update was persisted
+    status, read_back = call(args.base_url, "/api/nodes/ci-write-machine")
+    require(status == 200 and read_back.get("name") == "Patched name", f"patched node not readable: {read_back}")
+
+    # PATCH relation succeeds
+    status, patched_rel = call(
+        args.base_url,
+        "/api/write/relations/ci-write-depends",
+        "PATCH",
+        args.token,
+        {"expectedRevision": rev, "relation": {"certainty": "confirmed"}},
+    )
+    require(status == 200, f"patch relation failed with {status}: {patched_rel}")
+    require(patched_rel.get("relation", {}).get("certainty") == "confirmed", f"relation was not patched: {patched_rel}")
+    rev = patched_rel.get("revision")
+
+    # DELETE node blocked by active relation
+    status, _ = call(
+        args.base_url,
+        "/api/write/nodes/ci-write-machine",
+        "DELETE",
+        args.token,
+        {"expectedRevision": rev},
+    )
+    require(status == 409, f"deleting node with active relation must return 409, got {status}")
+
+    # DELETE relation succeeds
+    status, deleted_rel = call(
+        args.base_url,
+        "/api/write/relations/ci-write-depends",
+        "DELETE",
+        args.token,
+        {"expectedRevision": rev},
+    )
+    require(status == 200, f"delete relation failed with {status}: {deleted_rel}")
+    rev = deleted_rel.get("revision")
+
+    # DELETE node now succeeds
+    status, deleted_proj = call(
+        args.base_url,
+        "/api/write/nodes/ci-write-project",
+        "DELETE",
+        args.token,
+        {"expectedRevision": rev},
+    )
+    require(status == 200, f"delete project node failed with {status}: {deleted_proj}")
+    rev = deleted_proj.get("revision")
+
+    status, deleted_mach = call(
+        args.base_url,
+        "/api/write/nodes/ci-write-machine",
+        "DELETE",
+        args.token,
+        {"expectedRevision": rev},
+    )
+    require(status == 200, f"delete machine node failed with {status}: {deleted_mach}")
+
+    # Read back returns 404
+    status, _ = call(args.base_url, "/api/nodes/ci-write-machine")
+    require(status == 404, f"deleted node should return 404, got {status}")
+    status, _ = call(args.base_url, "/api/nodes/ci-write-project")
+    require(status == 404, f"deleted node should return 404, got {status}")
+
+    print("write API checks passed (auth, batch create, read-back, duplicate, dangling relation, stale revision, patch node/relation, delete integrity guard, delete cleanup, 404 read-back)")
 
 
 if __name__ == "__main__":

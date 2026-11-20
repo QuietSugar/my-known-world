@@ -809,3 +809,114 @@ func TestPreviewSyncDoesNotMutateSubmittedIdentityMappings(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectPatchAndDeleteMutations(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	store := openTestStore(t)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base := graph.New()
+	_ = base.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
+	if err := store.SaveSnapshot(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	revision, err := base.Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	batch := graph.CreateBatch{
+		Nodes: []graph.CreateNodeRequest{
+			{Node: graph.Node{ID: "host-mut", Type: graph.Machine, Name: "Host Mut", ModelVersion: 1, Source: "api-test"}},
+			{Node: graph.Node{ID: "proj-mut", Type: graph.SoftwareProject, Name: "Proj Mut", ModelVersion: 1, Source: "api-test"}},
+		},
+		Relations: []graph.Relation{
+			{ID: "rel-mut", From: "proj-mut", Predicate: graph.DependsOn, To: "host-mut", Source: "api-test"},
+		},
+	}
+	_, revAfterCreate, err := store.ApplyCreateBatch(ctx, batch, revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. PatchNode with stale revision fails
+	_, _, err = store.PatchNode(ctx, "host-mut", graph.Node{Name: "Stale Patch"}, "stale-revision")
+	if err == nil {
+		t.Fatal("expected error with stale revision on PatchNode")
+	}
+
+	// 2. PatchNode Self is rejected
+	_, _, err = store.PatchNode(ctx, "self", graph.Node{Name: "New Self"}, revAfterCreate)
+	if err == nil {
+		t.Fatal("expected error patching self node")
+	}
+
+	// 3. PatchNode host-mut succeeds
+	patchedNode, revAfterPatch, err := store.PatchNode(ctx, "host-mut", graph.Node{Name: "Host Mut Renamed"}, revAfterCreate)
+	if err != nil {
+		t.Fatalf("PatchNode failed: %v", err)
+	}
+	if patchedNode.Name != "Host Mut Renamed" || revAfterPatch == revAfterCreate {
+		t.Fatalf("unexpected patch result: %+v, rev: %s", patchedNode, revAfterPatch)
+	}
+
+	// 4. PatchRelation rel-mut succeeds
+	patchedRel, revAfterPatchRel, err := store.PatchRelation(ctx, "rel-mut", graph.Relation{Certainty: graph.CertaintyConfirmed, EvidenceKind: graph.EvidenceObserved}, revAfterPatch)
+	if err != nil {
+		t.Fatalf("PatchRelation failed: %v", err)
+	}
+	if patchedRel.Certainty != graph.CertaintyConfirmed || patchedRel.EvidenceKind != graph.EvidenceObserved || revAfterPatchRel == revAfterPatch {
+		t.Fatalf("unexpected patch relation result: %+v, rev: %s", patchedRel, revAfterPatchRel)
+	}
+
+	// 5. DeleteNode host-mut while proj-mut depends on it fails with 409 referential integrity error
+	_, err = store.DeleteNodeWithRevision(ctx, "host-mut", revAfterPatchRel)
+	if err == nil {
+		t.Fatal("expected error deleting node with active relations")
+	}
+
+	// 6. DeleteRelation rel-mut succeeds
+	revAfterDelRel, err := store.DeleteRelationWithRevision(ctx, "rel-mut", revAfterPatchRel)
+	if err != nil {
+		t.Fatalf("DeleteRelationWithRevision failed: %v", err)
+	}
+
+	// 7. DeleteNode host-mut now succeeds (only self anchor remains, cleaned up together)
+	revAfterDelHost, err := store.DeleteNodeWithRevision(ctx, "host-mut", revAfterDelRel)
+	if err != nil {
+		t.Fatalf("DeleteNodeWithRevision host-mut failed: %v", err)
+	}
+
+	// 8. DeleteNode proj-mut succeeds
+	revAfterDelProj, err := store.DeleteNodeWithRevision(ctx, "proj-mut", revAfterDelHost)
+	if err != nil {
+		t.Fatalf("DeleteNodeWithRevision proj-mut failed: %v", err)
+	}
+
+	// 9. Load snapshot and verify nodes and relations are removed
+	loaded, err := store.LoadSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Node("host-mut"); ok {
+		t.Fatal("host-mut still exists in snapshot")
+	}
+	if _, ok := loaded.Node("proj-mut"); ok {
+		t.Fatal("proj-mut still exists in snapshot")
+	}
+	if _, ok := loaded.Relation("rel-mut"); ok {
+		t.Fatal("rel-mut still exists in snapshot")
+	}
+
+	// 10. Check audit history
+	history, err := store.EntityHistory(ctx, "node", "host-mut", 10)
+	if err != nil || len(history) == 0 {
+		t.Fatalf("expected entity history for host-mut: %+v %v", history, err)
+	}
+	if history[0].Action != "deleted" {
+		t.Fatalf("latest action want deleted, got %s", history[0].Action)
+	}
+	_ = revAfterDelProj
+}

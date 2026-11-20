@@ -857,6 +857,219 @@ func (s *Store) mutateGraph(ctx context.Context, source string, mutate func(*gra
 	return tx.Commit()
 }
 
+func (s *Store) mutateWithOptimisticRevision(
+	ctx context.Context,
+	source string,
+	expectedRevision string,
+	mutate func(current *graph.Graph) (*graph.Graph, any, error),
+) (any, string, error) {
+	if expectedRevision == "" {
+		return nil, "", errors.New("expectedRevision is required")
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, "", err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `LOCK TABLE nodes, relations IN ACCESS EXCLUSIVE MODE`); err != nil {
+		return nil, "", err
+	}
+	current, err := loadSnapshotTx(ctx, tx)
+	if errors.Is(err, ErrEmptySnapshot) {
+		current = graph.New()
+	} else if err != nil {
+		return nil, "", err
+	}
+	revision, err := current.Fingerprint()
+	if err != nil {
+		return nil, "", err
+	}
+	if revision != expectedRevision {
+		return nil, "", errors.New("graph changed since this request was prepared; fetch the current revision and retry")
+	}
+	updated, result, err := mutate(current)
+	if err != nil {
+		return nil, "", err
+	}
+	updated = updated.CanonicalizeTimes()
+	if err = validateSnapshot(updated); err != nil {
+		return nil, "", err
+	}
+	if err = saveSnapshotTx(ctx, tx, updated); err != nil {
+		return nil, "", err
+	}
+	if err = appendGraphDiff(ctx, tx, nil, source, current, updated); err != nil {
+		return nil, "", err
+	}
+	beforeJSON, _ := json.Marshal(current.Snapshot())
+	afterJSON, _ := json.Marshal(updated.Snapshot())
+	afterHash, hashErr := updated.Fingerprint()
+	if hashErr != nil {
+		return nil, "", hashErr
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action,before_state,after_state,after_hash) VALUES($1,$2,$3,$4)`, source, beforeJSON, afterJSON, afterHash); err != nil {
+		return nil, "", fmt.Errorf("record reversible operation: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE graph_mutation_operations SET before_state='{}'::jsonb,after_state='{}'::jsonb WHERE operation_id NOT IN (SELECT operation_id FROM graph_mutation_operations ORDER BY recorded_at DESC,operation_id DESC LIMIT 50)`); err != nil {
+		return nil, "", fmt.Errorf("prune old undo snapshots: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, "", err
+	}
+	return result, afterHash, nil
+}
+
+func (s *Store) PatchNode(ctx context.Context, id string, patch graph.Node, expectedRevision string) (graph.Node, string, error) {
+	var patchedNode graph.Node
+	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:patchNode", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
+		old, ok := current.Node(id)
+		if !ok {
+			return nil, nil, fmt.Errorf("node %q not found", id)
+		}
+		if old.Type == graph.Self {
+			return nil, nil, errors.New("Self cannot be patched")
+		}
+		if patch.ID != "" && patch.ID != id {
+			return nil, nil, errors.New("node ID is immutable")
+		}
+		if patch.Type != "" && patch.Type != old.Type {
+			return nil, nil, errors.New("node type is immutable; use provisional review")
+		}
+		merged := old
+		if patch.Name != "" {
+			merged.Name = patch.Name
+		}
+		if patch.Lifecycle != "" {
+			merged.Lifecycle = patch.Lifecycle
+		}
+		if patch.Certainty != "" {
+			merged.Certainty = patch.Certainty
+		}
+		if patch.EvidenceKind != "" {
+			merged.EvidenceKind = patch.EvidenceKind
+		}
+		if patch.ModelVersion > 0 {
+			merged.ModelVersion = patch.ModelVersion
+		}
+		if patch.Machine != nil {
+			merged.Machine = patch.Machine
+		}
+		if patch.SoftwareProject != nil {
+			merged.SoftwareProject = patch.SoftwareProject
+		}
+		if patch.SoftwareInstance != nil {
+			merged.SoftwareInstance = patch.SoftwareInstance
+		}
+		if patch.Product != nil {
+			merged.Product = patch.Product
+		}
+		if patch.Runbook != nil {
+			merged.Runbook = patch.Runbook
+		}
+		if patch.WorkItem != nil {
+			merged.WorkItem = patch.WorkItem
+		}
+		if patch.Document != nil {
+			merged.Document = patch.Document
+		}
+		if patch.Network != nil {
+			merged.Network = patch.Network
+		}
+		if patch.Hardware != nil {
+			merged.Hardware = patch.Hardware
+		}
+		next, err := current.UpdateNode(id, merged)
+		if err != nil {
+			return nil, nil, err
+		}
+		patchedNode = merged
+		return next, merged, nil
+	})
+	if err != nil {
+		return graph.Node{}, "", err
+	}
+	return patchedNode, rev, nil
+}
+
+func (s *Store) DeleteNodeWithRevision(ctx context.Context, id string, expectedRevision string) (string, error) {
+	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:deleteNode", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
+		old, ok := current.Node(id)
+		if !ok {
+			return nil, nil, fmt.Errorf("node %q not found", id)
+		}
+		if old.Type == graph.Self {
+			return nil, nil, errors.New("Self cannot be patched")
+		}
+		if old.Type == graph.Self {
+			return nil, nil, errors.New("Self cannot be deleted")
+		}
+		for _, r := range current.Relations() {
+			if r.From == id || r.To == id {
+				fromNode, _ := current.Node(r.From)
+				if fromNode.Type == graph.Self && r.To == id {
+					continue
+				}
+				return nil, nil, fmt.Errorf("node %q has active relations (%s); remove relations first", id, r.ID)
+			}
+		}
+		next, err := current.DeleteNode(id)
+		if err != nil {
+			return nil, nil, err
+		}
+		return next, id, nil
+	})
+	return rev, err
+}
+
+func (s *Store) PatchRelation(ctx context.Context, id string, patch graph.Relation, expectedRevision string) (graph.Relation, string, error) {
+	var patchedRel graph.Relation
+	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:patchRelation", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
+		old, ok := current.Relation(id)
+		if !ok {
+			return nil, nil, fmt.Errorf("relation %q not found", id)
+		}
+		if patch.ID != "" && patch.ID != id {
+			return nil, nil, errors.New("relation ID is immutable")
+		}
+		if (patch.From != "" && patch.From != old.From) ||
+			(patch.To != "" && patch.To != old.To) ||
+			(patch.Predicate != "" && patch.Predicate != old.Predicate) {
+			return nil, nil, errors.New("relation endpoints and predicate are immutable; replace through explicit delete/add")
+		}
+		merged := old
+		if patch.Certainty != "" {
+			merged.Certainty = patch.Certainty
+		}
+		if patch.EvidenceKind != "" {
+			merged.EvidenceKind = patch.EvidenceKind
+		}
+		next, err := current.UpdateRelation(id, merged)
+		if err != nil {
+			return nil, nil, err
+		}
+		patchedRel = merged
+		return next, merged, nil
+	})
+	if err != nil {
+		return graph.Relation{}, "", err
+	}
+	return patchedRel, rev, nil
+}
+
+func (s *Store) DeleteRelationWithRevision(ctx context.Context, id string, expectedRevision string) (string, error) {
+	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:deleteRelation", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
+		if _, ok := current.Relation(id); !ok {
+			return nil, nil, fmt.Errorf("relation %q not found", id)
+		}
+		next, err := current.DeleteRelation(id)
+		if err != nil {
+			return nil, nil, err
+		}
+		return next, id, nil
+	})
+	return rev, err
+}
+
 func appendGraphDiff(ctx context.Context, tx *sql.Tx, runID *int64, source string, before, after *graph.Graph) error {
 	if err := recordEntityDiff(ctx, tx, runID, "node", source, before.Nodes(), after.Nodes(), func(v graph.Node) string { return v.ID }, func(v graph.Node) string { return v.Source }, func(v graph.Node) bool { return v.Certainty == graph.CertaintyStale }); err != nil {
 		return err

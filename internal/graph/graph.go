@@ -232,7 +232,8 @@ func validEndpoints(p Predicate, a, b NodeType) bool {
 	}
 }
 
-func (g *Graph) Node(id string) (Node, bool) { n, ok := g.nodes[id]; return n, ok }
+func (g *Graph) Node(id string) (Node, bool)         { n, ok := g.nodes[id]; return n, ok }
+func (g *Graph) Relation(id string) (Relation, bool) { r, ok := g.relations[id]; return r, ok }
 func (g *Graph) Nodes() []Node {
 	out := make([]Node, 0, len(g.nodes))
 	for _, n := range g.nodes {

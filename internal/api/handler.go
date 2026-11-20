@@ -163,8 +163,48 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if r.Method == http.MethodPatch {
+		switch {
+		case strings.HasPrefix(path, "/api/write/nodes/"):
+			id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/write/nodes/"))
+			if err != nil || id == "" {
+				writeError(w, http.StatusBadRequest, "invalid_id", "node id is invalid")
+				return
+			}
+			h.patchNodeAPI(w, r, id)
+			return
+		case strings.HasPrefix(path, "/api/write/relations/"):
+			id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/write/relations/"))
+			if err != nil || id == "" {
+				writeError(w, http.StatusBadRequest, "invalid_id", "relation id is invalid")
+				return
+			}
+			h.patchRelationAPI(w, r, id)
+			return
+		}
+	}
+	if r.Method == http.MethodDelete {
+		switch {
+		case strings.HasPrefix(path, "/api/write/nodes/"):
+			id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/write/nodes/"))
+			if err != nil || id == "" {
+				writeError(w, http.StatusBadRequest, "invalid_id", "node id is invalid")
+				return
+			}
+			h.deleteNodeAPI(w, r, id)
+			return
+		case strings.HasPrefix(path, "/api/write/relations/"):
+			id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/write/relations/"))
+			if err != nil || id == "" {
+				writeError(w, http.StatusBadRequest, "invalid_id", "relation id is invalid")
+				return
+			}
+			h.deleteRelationAPI(w, r, id)
+			return
+		}
+	}
 	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET, POST, PUT, DELETE")
+		w.Header().Set("Allow", "GET, POST, PUT, DELETE, PATCH")
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "unsupported method")
 		return
 	}
