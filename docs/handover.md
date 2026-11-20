@@ -10,8 +10,11 @@ to decide is listed under "Open work" and "Owner-only actions".
 - `master`: all gates green in GitHub Actions (gofmt, `go vet`, race tests with
   PostgreSQL integration tests, web build, hardened Compose stack, API/MCP/create
   API contract checks, image build).
-- Tracker: 0 open issues, 0 open PRs. Every closed issue or PR has a written
-  reason (`not planned` items explain what would make them reviewable).
+- Tracker: 0 open PRs. The three remaining gaps below are filed as #46 (backup and
+  restore drill), #47 (write `PATCH`/`DELETE`), and #48 (`/api/nodes` pagination and
+  summary projection) so they are actionable rather than prose. Every closed issue or
+  PR has a written reason (`not planned` items explain what would make them
+  reviewable).
 - Branches: only `master`. Old working branches were merged or superseded first,
   then deleted.
 - Release: `v0.1.1`, published as a normal (non-pre-release) release with
@@ -65,15 +68,15 @@ to decide is listed under "Open work" and "Owner-only actions".
 
 ## Open work, in priority order
 
-1. **Backup and restore are documented but not engineered.** There is no restore
-   script and no restore drill in CI. This is the top risk for real data:
+1. **Backup and restore are documented but not engineered** (issue #46). There is no
+   restore script and no restore drill in CI. This is the top risk for real data:
    `pg_dump -Fc` guidance exists, a tested restore path does not.
-2. **The write API has no update or delete.** Changing or removing an object still
-   goes through the preview-then-apply editor; scripting clients need two calls.
-   A `PATCH`/`DELETE` pair (optimistic `expectedRevision`, same token) is the
+2. **The write API has no update or delete** (issue #47). Changing or removing an
+   object still goes through the preview-then-apply editor; scripting clients need two
+   calls. A `PATCH`/`DELETE` pair (optimistic `expectedRevision`, same token) is the
    natural next feature.
-3. **`/api/nodes` returns the whole graph.** No pagination or projection. This is
-   the first thing that will hurt on a large graph; a `limit`/`cursor` plus a
+3. **`/api/nodes` returns the whole graph** (issue #48). No pagination or projection.
+   This is the first thing that will hurt on a large graph; a `limit`/`cursor` plus a
    summary-only projection would be a contained change.
 4. **Single write token, no identity, no metrics.** No per-user authorization and
    no Prometheus/structured operational metrics. Both are architecture-level.
