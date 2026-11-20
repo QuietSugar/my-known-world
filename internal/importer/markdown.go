@@ -22,7 +22,7 @@ import (
 	yaml "github.com/goccy/go-yaml"
 )
 
-const MarkdownParserVersion = "markdown-frontmatter-v3"
+const MarkdownParserVersion = "markdown-frontmatter-v4"
 const maxFrontmatterBytes = 1 << 20
 
 var errFrontmatterTooLarge = errors.New("frontmatter exceeds size limit")
@@ -61,6 +61,12 @@ type markdownFile struct {
 type markdownLink struct {
 	target string
 	line   int
+}
+type markdownRelationReference struct {
+	ID        string          `json:"id"`
+	Predicate graph.Predicate `json:"predicate"`
+	Direction string          `json:"direction"`
+	Target    string          `json:"target"`
 }
 
 var defaultSecretPatterns = []string{`(?i)password`, `(?i)secret`, `(?i)token`, `(?i)credential`, `(?i)key`, `(?i)private[_-]?key`, `(?i)api[_-]?key`}
@@ -242,7 +248,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 		if name == "" {
 			name = strings.TrimSuffix(path.Base(f.rel), path.Ext(f.rel))
 		}
-		node := graph.Node{ID: f.rel, Name: name, Lifecycle: firstString(f.data, "status"), Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1}
+		node := graph.Node{ID: f.rel, Name: name, Lifecycle: firstString(f.data, "lifecycle", "status"), Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1}
 		if !hasMapping {
 			node.Type = graph.ProvisionalObject
 			node.Certainty = graph.CertaintyProvisional
@@ -292,6 +298,10 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			}
 			if target == graph.AccountCredential {
 				node.AccountCredential = &graph.AccountCredentialDetails{Account: firstString(f.data, "account"), CredentialType: firstString(f.data, "credential_type"), Purpose: firstString(f.data, "purpose"), Scope: firstString(f.data, "scope"), AccessReference: firstString(f.data, "access_reference"), Status: firstString(f.data, "status")}
+			}
+			if err := decodeMarkdownModelDetails(f.data, &node); err != nil {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "invalid typed detail field; record excluded"})
+				continue
 			}
 			for _, field := range mappedFields(node, f.data) {
 				raw, e := json.Marshal(field.value)
@@ -439,6 +449,63 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 		if !ok {
 			continue
 		}
+		references, parseErr := markdownRelationReferences(f.data["relations"])
+		if parseErr != nil {
+			report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relations list is invalid"})
+			continue
+		}
+		for _, ref := range references {
+			targetPath, valid := safeReference(f.rel, ref.Target, filePaths)
+			if !valid || !filePaths[targetPath] {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation target is invalid or missing"})
+				continue
+			}
+			target, exists := mapped[targetPath]
+			if !exists {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation target is not a mapped valid entity"})
+				continue
+			}
+			fromID, toID := node.ID, target.ID
+			if ref.Direction == "in" {
+				fromID, toID = target.ID, node.ID
+			} else if ref.Direction != "out" {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation direction must be in or out"})
+				continue
+			}
+			rid := strings.TrimSpace(ref.ID)
+			if rid == "" {
+				rid = relationID(canonicalSourceID(fromID, cfg.IdentityMappings), ref.Predicate, canonicalSourceID(toID, cfg.IdentityMappings))
+			}
+			if len(rid) > 512 || strings.ContainsAny(rid, "\r\n") {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation identity is invalid"})
+				continue
+			}
+			if relationSeen[rid] {
+				continue
+			}
+			candidate := graph.Relation{ID: rid, From: fromID, Predicate: ref.Predicate, To: toID, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed}
+			check := graph.New()
+			if err := check.AddNode(mapped[fromID]); err != nil {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation endpoint is invalid"})
+				continue
+			}
+			if err := check.AddNode(mapped[toID]); err != nil {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation endpoint is invalid"})
+				continue
+			}
+			if err := check.AddRelation(candidate); err != nil {
+				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation predicate or endpoints are incompatible"})
+				continue
+			}
+			relationSeen[rid] = true
+			report.Batch.Relations = append(report.Batch.Relations, candidate)
+		}
+	}
+	for _, f := range files {
+		node, ok := mapped[f.rel]
+		if !ok {
+			continue
+		}
 		for _, link := range f.links {
 			targetPath, valid := safeReference(f.rel, link.target, filePaths)
 			if !valid || !filePaths[targetPath] {
@@ -504,6 +571,71 @@ func readFrontmatter(file string) ([]byte, bool, int, error) {
 	}
 	return nil, false, line, nil
 }
+func addAllPresentTypedFields(out *[]markdownMappedField, n graph.Node, fields map[string]any) {
+	prefix := ""
+	var detail any
+	switch n.Type {
+	case graph.Hardware:
+		prefix, detail = "hardware", n.Hardware
+	case graph.Machine:
+		prefix, detail = "machine", n.Machine
+	case graph.SoftwareProject:
+		prefix, detail = "softwareProject", n.SoftwareProject
+	case graph.SoftwareInstance:
+		prefix, detail = "softwareInstance", n.SoftwareInstance
+	case graph.AccountCredential:
+		prefix, detail = "accountCredential", n.AccountCredential
+	case graph.Product:
+		prefix, detail = "product", n.Product
+	case graph.Document:
+		prefix, detail = "document", n.Document
+	case graph.Runbook:
+		prefix, detail = "runbook", n.Runbook
+	case graph.WorkItem:
+		prefix, detail = "workItem", n.WorkItem
+	case graph.Network:
+		prefix, detail = "network", n.Network
+	}
+	if prefix == "" || detail == nil {
+		return
+	}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return
+	}
+	var values map[string]any
+	if json.Unmarshal(raw, &values) != nil {
+		return
+	}
+	present := map[string]bool{}
+	for _, item := range *out {
+		present[item.path] = true
+	}
+	for field, value := range values {
+		if _, ok := fields[camelToSnake(field)]; !ok {
+			continue
+		}
+		fieldPath := prefix + "." + field
+		if !present[fieldPath] {
+			*out = append(*out, markdownMappedField{path: fieldPath, value: value})
+			present[fieldPath] = true
+		}
+	}
+}
+func camelToSnake(value string) string {
+	var out strings.Builder
+	for i, r := range value {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				out.WriteByte('_')
+			}
+			r += 32
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
 func readMarkdownLinks(file string) ([]markdownLink, error) {
 	f, err := os.Open(file)
 	if err != nil {
@@ -720,6 +852,81 @@ func stringList(v any) []string {
 	}
 	return nil
 }
+func markdownRelationReferences(value any) ([]markdownRelationReference, error) {
+	if value == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var refs []markdownRelationReference
+	if err := json.Unmarshal(raw, &refs); err != nil {
+		return nil, err
+	}
+	for _, ref := range refs {
+		if strings.TrimSpace(string(ref.Predicate)) == "" || strings.TrimSpace(ref.Target) == "" || len(ref.ID) > 512 || strings.ContainsAny(ref.ID, "\r\n") {
+			return nil, errors.New("invalid relation reference")
+		}
+	}
+	return refs, nil
+}
+
+func decodeMarkdownModelDetails(fields map[string]any, node *graph.Node) error {
+	var target any
+	switch node.Type {
+	case graph.Hardware:
+		target = node.Hardware
+	case graph.Machine:
+		target = node.Machine
+	case graph.SoftwareProject:
+		target = node.SoftwareProject
+	case graph.SoftwareInstance:
+		target = node.SoftwareInstance
+	case graph.AccountCredential:
+		target = node.AccountCredential
+	case graph.Product:
+		target = node.Product
+	case graph.Document:
+		target = node.Document
+	case graph.Runbook:
+		target = node.Runbook
+	case graph.WorkItem:
+		target = node.WorkItem
+	case graph.Network:
+		target = node.Network
+	default:
+		return nil
+	}
+	camel := make(map[string]any, len(fields))
+	for key, value := range fields {
+		camel[snakeToCamel(key)] = value
+	}
+	data, err := json.Marshal(camel)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, target)
+}
+func snakeToCamel(value string) string {
+	var out strings.Builder
+	upper := false
+	for _, r := range value {
+		if r == '_' || r == '-' {
+			upper = true
+			continue
+		}
+		if upper {
+			if r >= 'a' && r <= 'z' {
+				r -= 32
+			}
+			upper = false
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
 func machineDetails(m map[string]any, kindField, configuredKind string) (*graph.MachineDetails, string) {
 	d := &graph.MachineDetails{Hostname: firstString(m, "hostname"), OS: firstString(m, "os"), Status: firstString(m, "status"), MachineKind: configuredKind, Owned: stringList(m["owned"])}
 	if v, ok := m[kindField]; ok {
@@ -822,7 +1029,10 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 			add(field, v)
 		}
 	}
-	addString("status", "lifecycle")
+	addString("lifecycle", "lifecycle")
+	if firstString(m, "lifecycle") == "" {
+		addString("status", "lifecycle")
+	}
 	if d := n.Hardware; d != nil {
 		addString("category", "hardware.category")
 		addString("model", "hardware.model")
@@ -936,6 +1146,7 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 			add("softwareInstance.operationalState", d.OperationalState)
 		}
 	}
+	addAllPresentTypedFields(&out, n, m)
 	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
 	return out
 }
