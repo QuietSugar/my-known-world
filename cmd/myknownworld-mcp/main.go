@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuietSugar/my-known-world/internal/mcpapi"
 	pgstore "github.com/QuietSugar/my-known-world/internal/store/postgres"
+	"github.com/QuietSugar/my-known-world/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -30,7 +31,7 @@ func run(ctx context.Context) error {
 	if _, err = store.LoadSnapshot(startup); err != nil {
 		return err
 	}
-	server, err := mcpapi.NewServer(store.LoadSnapshot, store, store)
+	server, err := mcpapi.NewServer(version.Current(), store.LoadSnapshot, store, store)
 	if err != nil {
 		return err
 	}

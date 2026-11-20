@@ -17,6 +17,7 @@ import (
 	"github.com/QuietSugar/my-known-world/internal/graph"
 	"github.com/QuietSugar/my-known-world/internal/mcpapi"
 	pgstore "github.com/QuietSugar/my-known-world/internal/store/postgres"
+	"github.com/QuietSugar/my-known-world/internal/version"
 	"github.com/QuietSugar/my-known-world/internal/webui"
 )
 
@@ -67,7 +68,7 @@ func main() {
 	if graphStore != nil {
 		mcpHistory, mcpAssertions = graphStore, graphStore
 	}
-	mcpHandler, err := mcpapi.NewHandler(func(ctx context.Context) (*graph.Graph, error) {
+	mcpHandler, err := mcpapi.NewHandler(version.Current(), func(ctx context.Context) (*graph.Graph, error) {
 		if graphStore != nil {
 			return graphStore.LoadSnapshot(ctx)
 		}

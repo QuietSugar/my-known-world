@@ -60,6 +60,40 @@ authoritative; Markdown is an explicit import/export format, never a watcher.
 Open `http://127.0.0.1:8080` (or `http://localhost:8080`); the port binds to
 loopback by default.
 
+## Running the bundled CLI tools in the container
+
+The runtime image ends with
+`ENTRYPOINT ["/sbin/tini","--","/usr/local/bin/myknownworld"]`. Appending a
+binary path to `docker run` therefore starts the **web server** with that path as
+an extra argument — it does not run the tool. Override the entrypoint:
+
+```sh
+mkdir -p ./export
+# The image runs as 10001:10001; a directory created by your own user is not
+# writable for that UID, which surfaces as "open /export/...: permission denied".
+chmod 777 ./export        # or: sudo chown 10001:10001 ./export
+docker run --rm \
+  --entrypoint /usr/local/bin/myknownworld-materialize \
+  -v "$PWD/export:/export" \
+  ghcr.io/quietsugar/my-known-world:v0.1.0 \
+  -api http://127.0.0.1:8080 -out /export
+```
+
+`-api http://127.0.0.1:8080` inside a container points at the container itself.
+Reach the host API with `--network host` (Linux) or
+`-api http://host.docker.internal:8080` (Docker Desktop), or use the Compose
+service name when the tool runs on the stack network.
+
+Alternative when the stack is already running: `docker compose exec` starts the
+tool as UID 10001 inside the existing container, so the output directory must be
+writable by that UID (`/tmp` is a tmpfs there, hence the documented
+`--out /tmp/materialized`, which disappears with the container).
+
+The same rule applies to every bundled binary: `myknownworld-mcp`,
+`myknownworld-markdown-import`, `myknownworld-cmdb`, and
+`myknownworld-materialize` all need `--entrypoint` (or `docker compose exec`)
+plus a writable output path or mount.
+
 ## Upgrade from v0.0.11
 
 - No manual database migration step: the app applies schema migrations on
@@ -85,6 +119,10 @@ loopback by default.
 - **#33 (materialization):** only hosting, product instances, and work-item
   references become Markdown relations; other relations, provenance and history
   are reported as unsupported, and original Markdown bodies were never stored.
+- **MCP version string:** the published v0.1.0 image reports
+  `serverInfo.version: "0.0.7"` in the MCP `initialize` handshake; the fix (issue
+  #40) is on `master` and ships in the next build. Browsing, querying, and the
+  write API are unaffected.
 - No multi-tenant or internet-facing deployment is supported. Keep the listener
   private, keep the write token secret, and test restores before trusting it
   with data you cannot recreate.
