@@ -16,6 +16,7 @@ MyKnownWorld distinguishes software projects from deployed instances, credential
 - [Read-only MCP interface](docs/read-only-mcp.md)
 - [Write API: create nodes and relations](docs/write-api.md)
 - [Secret providers and the CMDB credential boundary](docs/secret-providers.md)
+- [Backup and restore procedure](docs/backup-and-restore.md)
 - [Synthetic Markdown adapter configuration](docs/markdown-adapter-config.example.yaml)
 - [Handover: state, settled decisions, and open work](docs/handover.md)
 
