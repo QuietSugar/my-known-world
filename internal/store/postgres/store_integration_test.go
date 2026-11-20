@@ -771,3 +771,41 @@ func TestApplyCreateBatchIsAtomicRecordedAndRevisionChecked(t *testing.T) {
 		t.Fatal("undo did not remove the batch nodes")
 	}
 }
+
+func TestPreviewSyncDoesNotMutateSubmittedIdentityMappings(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	store := openTestStore(t)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base := graph.New()
+	_ = base.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
+	if err := store.SaveSnapshot(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	mappings := []graph.IdentityMapping{
+		{SourceID: "external-1", NodeID: "node-1"},
+		{SourceID: "external-2", NodeID: "node-2"},
+		{SourceID: "external-3", NodeID: "node-3"},
+		{SourceID: "external-4", NodeID: "node-4"},
+		{SourceID: "external-5", NodeID: "node-5"},
+		{SourceID: "external-6", NodeID: "node-6"},
+		{SourceID: "external-7", NodeID: "node-7"},
+		{SourceID: "external-8", NodeID: "node-8"},
+	}
+	batch := graph.SourceBatch{Source: "mapping-preview", IdentityMappings: append([]graph.IdentityMapping(nil), mappings...)}
+	for attempt := 0; attempt < 3; attempt++ {
+		if _, err := store.PreviewSync(ctx, batch); err != nil {
+			t.Fatal(err)
+		}
+		if len(batch.IdentityMappings) != len(mappings) {
+			t.Fatalf("preview changed mapping count from %d to %d", len(mappings), len(batch.IdentityMappings))
+		}
+		for i := range mappings {
+			if batch.IdentityMappings[i] != mappings[i] {
+				t.Fatalf("preview mutated submitted mapping %d: got %+v, want %+v", i, batch.IdentityMappings[i], mappings[i])
+			}
+		}
+	}
+}
