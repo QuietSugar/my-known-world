@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -371,4 +373,86 @@ func (g *Graph) Publish(n Node, relation Relation) error {
 		return err
 	}
 	return nil
+}
+
+// MatchesSearch checks if node matches needle against identity and typed detail fields.
+func (n Node) MatchesSearch(needle string) bool {
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	if needle == "" {
+		return false
+	}
+	contains := func(s string) bool {
+		return strings.Contains(strings.ToLower(s), needle)
+	}
+	if contains(n.ID) || contains(n.Name) || contains(n.Lifecycle) || contains(n.Source) {
+		return true
+	}
+	if contains(n.EvidenceRef) || contains(n.EvidenceReference) {
+		return true
+	}
+	if n.Machine != nil {
+		if contains(n.Machine.Hostname) || contains(n.Machine.OS) {
+			return true
+		}
+		for _, ip := range n.Machine.IPs {
+			if contains(ip) {
+				return true
+			}
+		}
+	}
+	if n.Hardware != nil {
+		if contains(n.Hardware.Model) || contains(n.Hardware.Category) || contains(n.Hardware.Location) {
+			return true
+		}
+	}
+	if n.SoftwareProject != nil {
+		if contains(n.SoftwareProject.RemoteRepository) || contains(n.SoftwareProject.Purpose) {
+			return true
+		}
+	}
+	if n.SoftwareInstance != nil {
+		if contains(n.SoftwareInstance.ProductName) || contains(n.SoftwareInstance.DeploymentPath) {
+			return true
+		}
+		for _, domain := range n.SoftwareInstance.Domains {
+			if contains(domain) {
+				return true
+			}
+		}
+		for _, port := range n.SoftwareInstance.Ports {
+			if contains(strconv.Itoa(port)) {
+				return true
+			}
+		}
+	}
+	if n.AccountCredential != nil {
+		if contains(n.AccountCredential.Account) || contains(n.AccountCredential.Purpose) {
+			return true
+		}
+	}
+	return false
+}
+
+// Search performs on-demand, streaming matching over the graph's nodes with zero resident memory index.
+func (g *Graph) Search(query string, limit int) []NodeSummary {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []NodeSummary{}
+	}
+	results := make([]NodeSummary, 0)
+	for _, n := range g.Nodes() {
+		if n.MatchesSearch(query) {
+			results = append(results, n.Summary())
+			if len(results) >= limit {
+				break
+			}
+		}
+	}
+	return results
 }

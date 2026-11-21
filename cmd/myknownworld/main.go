@@ -63,6 +63,7 @@ func main() {
 	apiHandler := &api.Handler{Graph: g, SyncPreviewer: syncPreviewer, Repository: repository, WriteToken: os.Getenv("MYKNOWNWORLD_WRITE_TOKEN")}
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/healthz", apiHandler)
+	mux.Handle("/metrics", apiHandler)
 	var mcpHistory mcpapi.HistoryReader
 	var mcpAssertions mcpapi.AssertionReader
 	if graphStore != nil {
