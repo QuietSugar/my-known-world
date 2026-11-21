@@ -231,6 +231,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case path == "/metrics" || path == "/api/metrics":
+		h.metricsAPI(w, r, g)
+		return
+	case path == "/api/search":
+		h.searchAPI(w, r, g)
+		return
+	case path == "/api/patrol":
+		h.patrolAPI(w, r, g)
+		return
 	case path == "/api/nodes":
 		q := r.URL.Query()
 		view := q.Get("view")

@@ -54,12 +54,12 @@ func TestMCPStreamableHTTPToolsAreTypedReadOnlyAndMatchGraphSemantics(t *testing
 	for _, tool := range listed.Tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history"} {
+	for _, name := range []string{"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history", "graph_search"} {
 		if !names[name] {
 			t.Fatalf("missing read tool %q", name)
 		}
 	}
-	if len(names) != 6 {
+	if len(names) != 7 {
 		t.Fatalf("unexpected tool registered (must not expose writes): %v", names)
 	}
 	empty, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "graph_query", Arguments: map[string]any{"text": "no matches"}})
@@ -87,6 +87,15 @@ func TestMCPStreamableHTTPToolsAreTypedReadOnlyAndMatchGraphSemantics(t *testing
 	byPortJSON, _ := json.Marshal(byPort.StructuredContent)
 	if err := json.Unmarshal(byPortJSON, &hostedOut); err != nil || hostedOut.Count != 1 || hostedOut.Items[0].ID != "service" {
 		t.Fatalf("service port text filter failed: %s (%v)", byPortJSON, err)
+	}
+	searchRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "graph_search", Arguments: map[string]any{"query": "example.invalid"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchJSON, _ := json.Marshal(searchRes.StructuredContent)
+	var searchOut SearchOutput
+	if err := json.Unmarshal(searchJSON, &searchOut); err != nil || searchOut.Count == 0 {
+		t.Fatalf("graph_search failed: %s (%v)", searchJSON, err)
 	}
 	entity, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "graph_entity", Arguments: map[string]any{"id": "machine"}})
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +58,7 @@ func NewServerWithWriter(implVersion string, load GraphLoader, history HistoryRe
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "my-known-world", Version: implVersion}, nil)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_query", Description: "Filter graph node summaries by type, lifecycle, certainty, evidence, hosting machine, and case-insensitive text across safe modeled fields."}, s.query)
+	mcp.AddTool(srv, &mcp.Tool{Name: "graph_search", Description: "Zero-resident-memory instant keyword search across node IDs, names, lifecycles, and typed fields."}, s.search)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_entity", Description: "Get typed node details, direct relations, Self path/category, and value-free assertion metadata."}, s.entity)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_relations", Description: "List direct relations for a node with direction and optional predicate filters."}, s.relations)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_impact", Description: "Return the existing confirmed operational impact paths from Self; knowsAbout is excluded."}, s.impact)
@@ -161,35 +161,42 @@ func hostedBy(g *graph.Graph, nodeID, hostID string) bool {
 }
 
 func matchesNodeText(n graph.Node, needle string) bool {
-	contains := func(value string) bool { return strings.Contains(strings.ToLower(value), needle) }
-	if contains(n.ID) || contains(n.Name) || contains(n.EvidenceRef) || contains(n.EvidenceReference) {
-		return true
+	return n.MatchesSearch(needle)
+}
+
+type SearchInput struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type SearchOutput struct {
+	Items []graph.NodeSummary `json:"items"`
+	Query string              `json:"query"`
+	Count int                 `json:"count"`
+}
+
+func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, SearchOutput, error) {
+	g, err := s.load(ctx)
+	if err != nil {
+		return nil, SearchOutput{}, err
 	}
-	if n.Machine != nil && (contains(n.Machine.Hostname) || contains(n.Machine.OS)) {
-		return true
+	q := strings.TrimSpace(in.Query)
+	if q == "" {
+		return nil, SearchOutput{}, errors.New("query is required")
 	}
-	if n.Hardware != nil && (contains(n.Hardware.Category) || contains(n.Hardware.Model) || contains(n.Hardware.Location)) {
-		return true
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 20
 	}
-	if n.SoftwareProject != nil && (contains(n.SoftwareProject.Purpose) || contains(n.SoftwareProject.RemoteRepository)) {
-		return true
+	if limit > 50 {
+		return nil, SearchOutput{}, errors.New("limit must be at most 50")
 	}
-	if n.SoftwareInstance != nil {
-		if contains(n.SoftwareInstance.ProductName) || contains(n.SoftwareInstance.DeploymentPath) {
-			return true
-		}
-		for _, domain := range n.SoftwareInstance.Domains {
-			if contains(domain) {
-				return true
-			}
-		}
-		for _, port := range n.SoftwareInstance.Ports {
-			if contains(strconv.Itoa(port)) {
-				return true
-			}
-		}
-	}
-	return false
+	items := g.Search(q, limit)
+	return nil, SearchOutput{
+		Items: items,
+		Query: q,
+		Count: len(items),
+	}, nil
 }
 
 type EntityInput struct {
