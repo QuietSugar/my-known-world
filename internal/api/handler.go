@@ -454,6 +454,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, n)
+	case strings.HasPrefix(path, "/api/workspace/projects/"):
+		id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/workspace/projects/"))
+		if err != nil || id == "" {
+			writeError(w, http.StatusBadRequest, "invalid_id", "project id is invalid")
+			return
+		}
+		h.projectWorkspaceAPI(w, r, g, id)
+		return
 	case strings.HasPrefix(path, "/api/explore/"):
 		id, err := url.PathUnescape(strings.TrimPrefix(path, "/api/explore/"))
 		if err != nil || id == "" {
