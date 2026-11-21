@@ -9,7 +9,7 @@ There are two write styles:
 
 | Style | Endpoints | Use it for |
 | --- | --- | --- |
-| Direct Write API (this document) | `POST /api/write/nodes`, `POST /api/write/relations`, `POST /api/write/batch`, `PATCH /api/write/nodes/{id}`, `DELETE /api/write/nodes/{id}`, `PATCH /api/write/relations/{id}`, `DELETE /api/write/relations/{id}` | scripts, automation, direct CRUD mutations |
+| Direct Write API (this document) | `POST /api/write/nodes`, `POST /api/write/relations`, `POST /api/write/batch`, `PATCH /api/write/nodes/{id}`, `POST /api/write/nodes/{id}/retire`, `DELETE /api/write/nodes/{id}`, `PATCH /api/write/relations/{id}`, `DELETE /api/write/relations/{id}` | scripts, automation, direct CRUD mutations |
 | Preview-and-confirm | `POST /api/operations/preview` then `/api/operations/apply` | interactive review of a single change |
 
 The legacy `POST /api/nodes` and `POST /api/relations` routes stay guarded: they
@@ -150,6 +150,40 @@ curl -sS -X PATCH http://127.0.0.1:8080/api/write/nodes/machine-home-nas \
   "revision": "…updated fingerprint…"
 }
 ```
+
+## Retire an existing node (Soft Decommission)
+
+Retires an entity by setting `lifecycle: "retired"` and updating `lastConfirmed`
+to the current UTC timestamp, without breaking existing graph relations or
+disconnecting nodes.
+
+Prefer retirement over physical deletion when an entity (such as hardware, a
+machine, or a software service) has reached end-of-life or decommissioning: it
+preserves history and historical context in the knowledge graph. The root `Self`
+node cannot be retired.
+
+```sh
+curl -sS -X POST http://127.0.0.1:8080/api/write/nodes/machine-home-nas/retire \
+  -H "Authorization: Bearer $MYKNOWNWORLD_WRITE_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"expectedRevision": "…graph fingerprint…"}'
+```
+
+```json
+{
+  "node": {
+    "id": "machine-home-nas",
+    "type": "Machine",
+    "name": "Home NAS Primary",
+    "lifecycle": "retired",
+    …
+  },
+  "revision": "…updated fingerprint…"
+}
+```
+
+Queries against `GET /api/nodes` support filtering out retired nodes via
+`?includeRetired=false` (defaults to `true` to return the complete graph).
 
 ## Delete an existing node
 

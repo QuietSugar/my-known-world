@@ -65,17 +65,22 @@ func main() {
 	mux.Handle("/healthz", apiHandler)
 	var mcpHistory mcpapi.HistoryReader
 	var mcpAssertions mcpapi.AssertionReader
+	var mcpWriter mcpapi.GraphWriter
+	writeToken := os.Getenv("MYKNOWNWORLD_WRITE_TOKEN")
 	if graphStore != nil {
 		mcpHistory, mcpAssertions = graphStore, graphStore
+		if len(writeToken) >= 32 {
+			mcpWriter = graphStore
+		}
 	}
-	mcpHandler, err := mcpapi.NewHandler(version.Current(), func(ctx context.Context) (*graph.Graph, error) {
+	mcpHandler, err := mcpapi.NewHandlerWithWriter(version.Current(), func(ctx context.Context) (*graph.Graph, error) {
 		if graphStore != nil {
 			return graphStore.LoadSnapshot(ctx)
 		}
 		return g.Clone(), nil
-	}, mcpHistory, mcpAssertions)
+	}, mcpHistory, mcpWriter, mcpAssertions)
 	if err != nil {
-		log.Fatalf("configure read-only MCP: %v", err)
+		log.Fatalf("configure MCP: %v", err)
 	}
 	mux.Handle("/mcp", mcpHandler)
 	if target := os.Getenv("CMDB_PROXY_TARGET"); target != "" {

@@ -1,5 +1,4 @@
-// Package mcpapi exposes read-only graph queries over the official MCP Go SDK.
-// Its server is constructed with query tools only; no mutation tool is registered.
+// Package mcpapi exposes graph queries and safe agent mutation tools over the official MCP Go SDK.
 package mcpapi
 
 import (
@@ -24,22 +23,37 @@ type HistoryReader interface {
 type AssertionReader interface {
 	AssertionViews(context.Context, string) ([]graph.AssertionView, error)
 }
+
+// GraphWriter defines mutation capabilities for writable MCP tools.
+type GraphWriter interface {
+	ApplyCreateBatch(ctx context.Context, batch graph.CreateBatch, expectedRevision string) (graph.CreateResult, string, error)
+	PatchNode(ctx context.Context, id string, patch graph.Node, expectedRevision string) (graph.Node, string, error)
+	RetireNode(ctx context.Context, id string, expectedRevision string) (graph.Node, string, error)
+	DeleteNodeWithRevision(ctx context.Context, id string, expectedRevision string) (string, error)
+}
+
 type Server struct {
 	load       GraphLoader
 	history    HistoryReader
 	assertions AssertionReader
+	writer     GraphWriter
 }
 
-// NewServer builds the read-only MCP server. implVersion is advertised as
+// NewServer builds the MCP server. implVersion is advertised as
 // serverInfo.version in the initialize handshake; callers pass version.Current().
 func NewServer(implVersion string, load GraphLoader, history HistoryReader, assertionReaders ...AssertionReader) (*mcp.Server, error) {
+	return NewServerWithWriter(implVersion, load, history, nil, assertionReaders...)
+}
+
+// NewServerWithWriter builds an MCP server with optional mutation tools.
+func NewServerWithWriter(implVersion string, load GraphLoader, history HistoryReader, writer GraphWriter, assertionReaders ...AssertionReader) (*mcp.Server, error) {
 	if load == nil {
 		return nil, errors.New("graph loader is required")
 	}
 	if strings.TrimSpace(implVersion) == "" {
 		implVersion = "dev"
 	}
-	s := &Server{load: load, history: history}
+	s := &Server{load: load, history: history, writer: writer}
 	if len(assertionReaders) > 0 {
 		s.assertions = assertionReaders[0]
 	}
@@ -50,12 +64,37 @@ func NewServer(implVersion string, load GraphLoader, history HistoryReader, asse
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_impact", Description: "Return the existing confirmed operational impact paths from Self; knowsAbout is excluded."}, s.impact)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_explore", Description: "Explore a bounded subgraph using the domain graph's direction, depth, and predicate rules."}, s.explore)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_history", Description: "Read append-only history for a node or relation ID."}, s.entityHistory)
+
+	if s.writer != nil {
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "graph_create_node",
+			Description: "Create a new graph node and anchor it to Self. Every published node requires connectivity from Self; specify anchor.predicate ('knowsAbout', 'owns', 'maintains', 'uses', or 'canOperate') to define the relation from Self. Returns created node and new graph revision.",
+		}, s.createNode)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "graph_patch_node",
+			Description: "Update editable attributes of an existing node under optimistic concurrency control. ID and Type are immutable. Requires expectedRevision from a previous read. Self cannot be patched. Returns updated node and new revision.",
+		}, s.patchNode)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "graph_retire_node",
+			Description: "Retire (soft decommission) an active entity by setting its lifecycle to 'retired' and stamping lastConfirmed time. Preserves the node and its relations in the graph without breaking connectivity. Prefer retirement over physical deletion for decommissioned hardware, machines, or services. Self cannot be retired. Returns retired node and new revision.",
+		}, s.retireNode)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "graph_delete_node",
+			Description: "Physically remove a node and its attached assertions from the graph under optimistic concurrency control. Requires expectedRevision. Self cannot be deleted. Fails if active non-Self relations exist (remove them first) or if deletion would disconnect other nodes. Use graph_retire_node instead when an entity is decommissioned. Returns deleted id and new revision.",
+		}, s.deleteNode)
+	}
+
 	return srv, nil
 }
 
 // NewHandler wraps NewServer in the streamable HTTP transport.
 func NewHandler(implVersion string, load GraphLoader, history HistoryReader, assertionReaders ...AssertionReader) (*mcp.StreamableHTTPHandler, error) {
-	srv, err := NewServer(implVersion, load, history, assertionReaders...)
+	return NewHandlerWithWriter(implVersion, load, history, nil, assertionReaders...)
+}
+
+// NewHandlerWithWriter wraps NewServerWithWriter in the streamable HTTP transport.
+func NewHandlerWithWriter(implVersion string, load GraphLoader, history HistoryReader, writer GraphWriter, assertionReaders ...AssertionReader) (*mcp.StreamableHTTPHandler, error) {
+	srv, err := NewServerWithWriter(implVersion, load, history, writer, assertionReaders...)
 	if err != nil {
 		return nil, err
 	}
@@ -355,3 +394,263 @@ func (s *Server) entityHistory(ctx context.Context, _ *mcp.CallToolRequest, in H
 	}
 	return nil, HistoryOutput{Items: out, Count: len(out)}, nil
 }
+
+type CreateNodeData struct {
+	ID                 string                          `json:"id"`
+	Type               graph.NodeType                  `json:"type"`
+	Name               string                          `json:"name"`
+	Lifecycle          string                          `json:"lifecycle,omitempty"`
+	Source             string                          `json:"source,omitempty"`
+	EvidenceKind       graph.EvidenceKind              `json:"evidenceKind,omitempty"`
+	Certainty          graph.Certainty                 `json:"certainty,omitempty"`
+	ModelVersion       int                             `json:"modelVersion,omitempty"`
+	CandidateType      graph.NodeType                  `json:"candidateType,omitempty"`
+	ReviewStatus       string                          `json:"reviewStatus,omitempty"`
+	ReviewQuestions    []string                        `json:"reviewQuestions,omitempty"`
+	StartedAt          *time.Time                      `json:"startedAt,omitempty"`
+	EndedAt            *time.Time                      `json:"endedAt,omitempty"`
+	DeployedVersion    string                          `json:"deployedVersion,omitempty"`
+	VerificationAt     *time.Time                      `json:"verificationAt,omitempty"`
+	VerificationResult string                          `json:"verificationResult,omitempty"`
+	EvidenceRef        string                          `json:"evidenceRef,omitempty"`
+	EvidenceReference  string                          `json:"evidenceReference,omitempty"`
+	Hardware           *graph.HardwareDetails          `json:"hardware,omitempty"`
+	Machine            *graph.MachineDetails           `json:"machine,omitempty"`
+	SoftwareProject    *graph.SoftwareProjectDetails   `json:"softwareProject,omitempty"`
+	SoftwareInstance   *graph.SoftwareInstanceDetails  `json:"softwareInstance,omitempty"`
+	AccountCredential  *graph.AccountCredentialDetails `json:"accountCredential,omitempty"`
+	Product            *graph.ProductDetails           `json:"product,omitempty"`
+	Document           *graph.DocumentDetails          `json:"document,omitempty"`
+	Runbook            *graph.RunbookDetails           `json:"runbook,omitempty"`
+	WorkItem           *graph.WorkItemDetails          `json:"workItem,omitempty"`
+	Network            *graph.NetworkDetails           `json:"network,omitempty"`
+}
+
+func (d CreateNodeData) toNode() graph.Node {
+	mv := d.ModelVersion
+	if mv <= 0 {
+		mv = 1
+	}
+	src := d.Source
+	if src == "" {
+		src = "agent"
+	}
+	ek := d.EvidenceKind
+	if ek == "" {
+		ek = graph.EvidenceManual
+	}
+	cert := d.Certainty
+	if cert == "" {
+		cert = graph.CertaintyConfirmed
+	}
+	return graph.Node{
+		ID:                 d.ID,
+		Type:               d.Type,
+		Name:               d.Name,
+		Lifecycle:          d.Lifecycle,
+		Source:             src,
+		EvidenceKind:       ek,
+		Certainty:          cert,
+		ModelVersion:       mv,
+		CandidateType:      d.CandidateType,
+		ReviewStatus:       d.ReviewStatus,
+		ReviewQuestions:    d.ReviewQuestions,
+		StartedAt:          d.StartedAt,
+		EndedAt:            d.EndedAt,
+		DeployedVersion:    d.DeployedVersion,
+		VerificationAt:     d.VerificationAt,
+		VerificationResult: d.VerificationResult,
+		EvidenceRef:        d.EvidenceRef,
+		EvidenceReference:  d.EvidenceReference,
+		Hardware:           d.Hardware,
+		Machine:            d.Machine,
+		SoftwareProject:    d.SoftwareProject,
+		SoftwareInstance:   d.SoftwareInstance,
+		AccountCredential:  d.AccountCredential,
+		Product:            d.Product,
+		Document:           d.Document,
+		Runbook:            d.Runbook,
+		WorkItem:           d.WorkItem,
+		Network:            d.Network,
+	}
+}
+
+type PatchNodeData struct {
+	Name               string                          `json:"name,omitempty"`
+	Lifecycle          string                          `json:"lifecycle,omitempty"`
+	Source             string                          `json:"source,omitempty"`
+	EvidenceKind       graph.EvidenceKind              `json:"evidenceKind,omitempty"`
+	Certainty          graph.Certainty                 `json:"certainty,omitempty"`
+	ModelVersion       int                             `json:"modelVersion,omitempty"`
+	CandidateType      graph.NodeType                  `json:"candidateType,omitempty"`
+	ReviewStatus       string                          `json:"reviewStatus,omitempty"`
+	ReviewQuestions    []string                        `json:"reviewQuestions,omitempty"`
+	StartedAt          *time.Time                      `json:"startedAt,omitempty"`
+	EndedAt            *time.Time                      `json:"endedAt,omitempty"`
+	DeployedVersion    string                          `json:"deployedVersion,omitempty"`
+	VerificationAt     *time.Time                      `json:"verificationAt,omitempty"`
+	VerificationResult string                          `json:"verificationResult,omitempty"`
+	EvidenceRef        string                          `json:"evidenceRef,omitempty"`
+	EvidenceReference  string                          `json:"evidenceReference,omitempty"`
+	Hardware           *graph.HardwareDetails          `json:"hardware,omitempty"`
+	Machine            *graph.MachineDetails           `json:"machine,omitempty"`
+	SoftwareProject    *graph.SoftwareProjectDetails   `json:"softwareProject,omitempty"`
+	SoftwareInstance   *graph.SoftwareInstanceDetails  `json:"softwareInstance,omitempty"`
+	AccountCredential  *graph.AccountCredentialDetails `json:"accountCredential,omitempty"`
+	Product            *graph.ProductDetails           `json:"product,omitempty"`
+	Document           *graph.DocumentDetails          `json:"document,omitempty"`
+	Runbook            *graph.RunbookDetails           `json:"runbook,omitempty"`
+	WorkItem           *graph.WorkItemDetails          `json:"workItem,omitempty"`
+	Network            *graph.NetworkDetails           `json:"network,omitempty"`
+}
+
+func (d PatchNodeData) toNode(id string) graph.Node {
+	return graph.Node{
+		ID:                 id,
+		Name:               d.Name,
+		Lifecycle:          d.Lifecycle,
+		Source:             d.Source,
+		EvidenceKind:       d.EvidenceKind,
+		Certainty:          d.Certainty,
+		ModelVersion:       d.ModelVersion,
+		CandidateType:      d.CandidateType,
+		ReviewStatus:       d.ReviewStatus,
+		ReviewQuestions:    d.ReviewQuestions,
+		StartedAt:          d.StartedAt,
+		EndedAt:            d.EndedAt,
+		DeployedVersion:    d.DeployedVersion,
+		VerificationAt:     d.VerificationAt,
+		VerificationResult: d.VerificationResult,
+		EvidenceRef:        d.EvidenceRef,
+		EvidenceReference:  d.EvidenceReference,
+		Hardware:           d.Hardware,
+		Machine:            d.Machine,
+		SoftwareProject:    d.SoftwareProject,
+		SoftwareInstance:   d.SoftwareInstance,
+		AccountCredential:  d.AccountCredential,
+		Product:            d.Product,
+		Document:           d.Document,
+		Runbook:            d.Runbook,
+		WorkItem:           d.WorkItem,
+		Network:            d.Network,
+	}
+}
+
+type CreateNodeInput struct {
+	Node   CreateNodeData      `json:"node"`
+	Anchor *graph.CreateAnchor `json:"anchor,omitempty"`
+}
+
+type CreateNodeOutput struct {
+	Node     graph.Node `json:"node"`
+	Revision string     `json:"revision"`
+}
+
+func (s *Server) createNode(ctx context.Context, _ *mcp.CallToolRequest, in CreateNodeInput) (*mcp.CallToolResult, CreateNodeOutput, error) {
+	if s.writer == nil {
+		return nil, CreateNodeOutput{}, errors.New("write operations are not enabled")
+	}
+	if in.Node.ID == "" {
+		return nil, CreateNodeOutput{}, errors.New("node id is required")
+	}
+	node := in.Node.toNode()
+	batch := graph.CreateBatch{
+		Nodes: []graph.CreateNodeRequest{{Node: node, Anchor: in.Anchor}},
+	}
+	result, rev, err := s.writer.ApplyCreateBatch(ctx, batch, "")
+	if err != nil {
+		return nil, CreateNodeOutput{}, err
+	}
+	createdNode := node
+	if len(result.NodeIDs) > 0 {
+		createdID := result.NodeIDs[0]
+		if g, loadErr := s.load(ctx); loadErr == nil && g != nil {
+			if n, ok := g.Node(createdID); ok {
+				createdNode = n
+			}
+		}
+	}
+	return nil, CreateNodeOutput{Node: createdNode, Revision: rev}, nil
+}
+
+type PatchNodeInput struct {
+	ID               string        `json:"id"`
+	Node             PatchNodeData `json:"node"`
+	ExpectedRevision string        `json:"expectedRevision"`
+}
+
+type PatchNodeOutput struct {
+	Node     graph.Node `json:"node"`
+	Revision string     `json:"revision"`
+}
+
+func (s *Server) patchNode(ctx context.Context, _ *mcp.CallToolRequest, in PatchNodeInput) (*mcp.CallToolResult, PatchNodeOutput, error) {
+	if s.writer == nil {
+		return nil, PatchNodeOutput{}, errors.New("write operations are not enabled")
+	}
+	if strings.TrimSpace(in.ID) == "" {
+		return nil, PatchNodeOutput{}, errors.New("id is required")
+	}
+	if strings.TrimSpace(in.ExpectedRevision) == "" {
+		return nil, PatchNodeOutput{}, errors.New("expectedRevision is required")
+	}
+	patch := in.Node.toNode(in.ID)
+	updated, rev, err := s.writer.PatchNode(ctx, in.ID, patch, in.ExpectedRevision)
+	if err != nil {
+		return nil, PatchNodeOutput{}, err
+	}
+	return nil, PatchNodeOutput{Node: updated, Revision: rev}, nil
+}
+
+type RetireNodeInput struct {
+	ID               string `json:"id"`
+	ExpectedRevision string `json:"expectedRevision,omitempty"`
+}
+
+type RetireNodeOutput struct {
+	Node     graph.Node `json:"node"`
+	Revision string     `json:"revision"`
+}
+
+func (s *Server) retireNode(ctx context.Context, _ *mcp.CallToolRequest, in RetireNodeInput) (*mcp.CallToolResult, RetireNodeOutput, error) {
+	if s.writer == nil {
+		return nil, RetireNodeOutput{}, errors.New("write operations are not enabled")
+	}
+	if strings.TrimSpace(in.ID) == "" {
+		return nil, RetireNodeOutput{}, errors.New("id is required")
+	}
+	retired, rev, err := s.writer.RetireNode(ctx, in.ID, in.ExpectedRevision)
+	if err != nil {
+		return nil, RetireNodeOutput{}, err
+	}
+	return nil, RetireNodeOutput{Node: retired, Revision: rev}, nil
+}
+
+type DeleteNodeInput struct {
+	ID               string `json:"id"`
+	ExpectedRevision string `json:"expectedRevision"`
+}
+
+type DeleteNodeOutput struct {
+	ID        string `json:"id"`
+	DeletedID string `json:"deletedId"`
+	Revision  string `json:"revision"`
+}
+
+func (s *Server) deleteNode(ctx context.Context, _ *mcp.CallToolRequest, in DeleteNodeInput) (*mcp.CallToolResult, DeleteNodeOutput, error) {
+	if s.writer == nil {
+		return nil, DeleteNodeOutput{}, errors.New("write operations are not enabled")
+	}
+	if strings.TrimSpace(in.ID) == "" {
+		return nil, DeleteNodeOutput{}, errors.New("id is required")
+	}
+	if strings.TrimSpace(in.ExpectedRevision) == "" {
+		return nil, DeleteNodeOutput{}, errors.New("expectedRevision is required")
+	}
+	rev, err := s.writer.DeleteNodeWithRevision(ctx, in.ID, in.ExpectedRevision)
+	if err != nil {
+		return nil, DeleteNodeOutput{}, err
+	}
+	return nil, DeleteNodeOutput{ID: in.ID, DeletedID: in.ID, Revision: rev}, nil
+}
+

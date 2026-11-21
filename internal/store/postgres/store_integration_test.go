@@ -918,5 +918,55 @@ func TestDirectPatchAndDeleteMutations(t *testing.T) {
 	if history[0].Action != "deleted" {
 		t.Fatalf("latest action want deleted, got %s", history[0].Action)
 	}
-	_ = revAfterDelProj
+
+	// 11. Test RetireNode
+	retireBatch := graph.CreateBatch{
+		Nodes: []graph.CreateNodeRequest{
+			{
+				Node:   graph.Node{ID: "retire-target", Type: graph.Machine, Name: "Machine to Retire", Lifecycle: "active", ModelVersion: 1},
+				Anchor: &graph.CreateAnchor{Predicate: graph.Owns},
+			},
+		},
+	}
+	_, revBeforeRetire, err := store.ApplyCreateBatch(ctx, retireBatch, revAfterDelProj)
+	if err != nil {
+		t.Fatalf("create retire target failed: %v", err)
+	}
+
+	// Retiring Self is rejected
+	if _, _, err := store.RetireNode(ctx, "self", revBeforeRetire); err == nil {
+		t.Fatal("expected error retiring self")
+	}
+
+	// Retiring with stale revision is rejected
+	if _, _, err := store.RetireNode(ctx, "retire-target", "stale-rev"); err == nil {
+		t.Fatal("expected error retiring with stale revision")
+	}
+
+	// Retiring succeeds
+	retiredNode, revAfterRetire, err := store.RetireNode(ctx, "retire-target", revBeforeRetire)
+	if err != nil {
+		t.Fatalf("RetireNode failed: %v", err)
+	}
+	if retiredNode.Lifecycle != "retired" {
+		t.Fatalf("expected lifecycle retired, got %q", retiredNode.Lifecycle)
+	}
+	if retiredNode.LastConfirmed == nil {
+		t.Fatal("expected non-nil LastConfirmed")
+	}
+	if revAfterRetire == revBeforeRetire {
+		t.Fatal("revision did not change after retire")
+	}
+
+	// Check audit history for retire
+	retireHist, err := store.EntityHistory(ctx, "node", "retire-target", 10)
+	if err != nil || len(retireHist) == 0 {
+		t.Fatalf("expected history for retire-target: %v", err)
+	}
+	if retireHist[0].Action != "updated" {
+		t.Fatalf("expected updated action in history, got %s", retireHist[0].Action)
+	}
+	if retireHist[0].Source != "manual:retireNode" {
+		t.Fatalf("expected source manual:retireNode, got %s", retireHist[0].Source)
+	}
 }

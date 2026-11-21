@@ -31,7 +31,7 @@ func run(ctx context.Context) error {
 	if _, err = store.LoadSnapshot(startup); err != nil {
 		return err
 	}
-	server, err := mcpapi.NewServer(version.Current(), store.LoadSnapshot, store, store)
+	server, err := mcpapi.NewServerWithWriter(version.Current(), store.LoadSnapshot, store, store, store)
 	if err != nil {
 		return err
 	}

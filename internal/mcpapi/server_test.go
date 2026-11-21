@@ -3,6 +3,8 @@ package mcpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -184,3 +186,227 @@ func TestHandshakeFallsBackToDevForBlankVersion(t *testing.T) {
 		t.Fatalf("serverInfo.version = %q, want dev fallback", got)
 	}
 }
+
+type testWriter struct {
+	g        *graph.Graph
+	revision string
+}
+
+func (w *testWriter) ApplyCreateBatch(_ context.Context, batch graph.CreateBatch, expectedRevision string) (graph.CreateResult, string, error) {
+	if expectedRevision != "" && expectedRevision != w.revision {
+		return graph.CreateResult{}, "", errors.New("stale revision")
+	}
+	next, res, err := w.g.ApplyCreateBatch(batch)
+	if err != nil {
+		return graph.CreateResult{}, "", err
+	}
+	w.g = next
+	w.revision = "rev-after-create"
+	return res, w.revision, nil
+}
+
+func (w *testWriter) PatchNode(_ context.Context, id string, patch graph.Node, expectedRevision string) (graph.Node, string, error) {
+	if expectedRevision == "" || expectedRevision != w.revision {
+		return graph.Node{}, "", errors.New("stale revision")
+	}
+	old, ok := w.g.Node(id)
+	if !ok {
+		return graph.Node{}, "", fmt.Errorf("node %q not found", id)
+	}
+	if old.Type == graph.Self {
+		return graph.Node{}, "", errors.New("Self cannot be patched")
+	}
+	merged := old
+	if patch.Name != "" {
+		merged.Name = patch.Name
+	}
+	next, err := w.g.UpdateNode(id, merged)
+	if err != nil {
+		return graph.Node{}, "", err
+	}
+	w.g = next
+	w.revision = "rev-after-patch"
+	return merged, w.revision, nil
+}
+
+func (w *testWriter) RetireNode(_ context.Context, id string, expectedRevision string) (graph.Node, string, error) {
+	if expectedRevision != "" && expectedRevision != w.revision {
+		return graph.Node{}, "", errors.New("stale revision")
+	}
+	old, ok := w.g.Node(id)
+	if !ok {
+		return graph.Node{}, "", fmt.Errorf("node %q not found", id)
+	}
+	if old.Type == graph.Self {
+		return graph.Node{}, "", errors.New("Self cannot be retired")
+	}
+	next, err := w.g.RetireNode(id)
+	if err != nil {
+		return graph.Node{}, "", err
+	}
+	w.g = next
+	w.revision = "rev-after-retire"
+	retired, _ := w.g.Node(id)
+	return retired, w.revision, nil
+}
+
+func (w *testWriter) DeleteNodeWithRevision(_ context.Context, id string, expectedRevision string) (string, error) {
+	if expectedRevision == "" || expectedRevision != w.revision {
+		return "", errors.New("stale revision")
+	}
+	old, ok := w.g.Node(id)
+	if !ok {
+		return "", fmt.Errorf("node %q not found", id)
+	}
+	if old.Type == graph.Self {
+		return "", errors.New("Self cannot be deleted")
+	}
+	next, err := w.g.DeleteNode(id)
+	if err != nil {
+		return "", err
+	}
+	w.g = next
+	w.revision = "rev-after-delete"
+	return w.revision, nil
+}
+
+func TestMCPWritableToolsWhenConfigured(t *testing.T) {
+	g := testGraph()
+	writer := &testWriter{g: g, revision: "rev-0"}
+	handler, err := NewHandlerWithWriter("0.2.0", func(context.Context) (*graph.Graph, error) { return writer.g.Clone(), nil }, historyFixture{}, writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	listed, err := session.ListTools(context.Background(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, tool := range listed.Tools {
+		names[tool.Name] = true
+	}
+	expectedTools := []string{
+		"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history",
+		"graph_create_node", "graph_patch_node", "graph_retire_node", "graph_delete_node",
+	}
+	for _, name := range expectedTools {
+		if !names[name] {
+			t.Fatalf("expected tool %q to be registered", name)
+		}
+	}
+	if len(names) != 10 {
+		t.Fatalf("expected exactly 10 tools, got %d: %v", len(names), names)
+	}
+
+	// 1. graph_create_node
+	createRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "graph_create_node",
+		Arguments: map[string]any{
+			"node": map[string]any{
+				"id":           "mcp-machine",
+				"type":         "Machine",
+				"name":         "MCP Machine",
+				"modelVersion": 1,
+			},
+			"anchor": map[string]any{
+				"predicate": "owns",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("graph_create_node failed: %v", err)
+	}
+	createJSON, _ := json.Marshal(createRes.StructuredContent)
+	var createOut CreateNodeOutput
+	if err := json.Unmarshal(createJSON, &createOut); err != nil {
+		t.Fatalf("unmarshal create output: %v", err)
+	}
+	if createOut.Node.ID != "mcp-machine" || createOut.Revision != "rev-after-create" {
+		t.Fatalf("unexpected create output: %+v", createOut)
+	}
+
+	// 2. graph_patch_node
+	patchRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "graph_patch_node",
+		Arguments: map[string]any{
+			"id":               "mcp-machine",
+			"expectedRevision": "rev-after-create",
+			"node": map[string]any{
+				"name": "MCP Machine Renamed",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("graph_patch_node failed: %v", err)
+	}
+	patchJSON, _ := json.Marshal(patchRes.StructuredContent)
+	var patchOut PatchNodeOutput
+	if err := json.Unmarshal(patchJSON, &patchOut); err != nil {
+		t.Fatalf("unmarshal patch output: %v", err)
+	}
+	if patchOut.Node.Name != "MCP Machine Renamed" || patchOut.Revision != "rev-after-patch" {
+		t.Fatalf("unexpected patch output: %+v", patchOut)
+	}
+
+	// 3. graph_retire_node
+	retireRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "graph_retire_node",
+		Arguments: map[string]any{
+			"id":               "mcp-machine",
+			"expectedRevision": "rev-after-patch",
+		},
+	})
+	if err != nil {
+		t.Fatalf("graph_retire_node failed: %v", err)
+	}
+	retireJSON, _ := json.Marshal(retireRes.StructuredContent)
+	var retireOut RetireNodeOutput
+	if err := json.Unmarshal(retireJSON, &retireOut); err != nil {
+		t.Fatalf("unmarshal retire output: %v", err)
+	}
+	if retireOut.Node.Lifecycle != "retired" || retireOut.Revision != "rev-after-retire" {
+		t.Fatalf("unexpected retire output: %+v", retireOut)
+	}
+
+	// 4. graph_retire_node on Self returns error
+	selfRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "graph_retire_node",
+		Arguments: map[string]any{
+			"id": "self",
+		},
+	})
+	if err == nil && (selfRes == nil || !selfRes.IsError) {
+		t.Fatal("expected error retiring Self")
+	}
+
+	// 5. graph_delete_node
+	deleteRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "graph_delete_node",
+		Arguments: map[string]any{
+			"id":               "mcp-machine",
+			"expectedRevision": "rev-after-retire",
+		},
+	})
+	if err != nil {
+		t.Fatalf("graph_delete_node failed: %v", err)
+	}
+	deleteJSON, _ := json.Marshal(deleteRes.StructuredContent)
+	var deleteOut DeleteNodeOutput
+	if err := json.Unmarshal(deleteJSON, &deleteOut); err != nil {
+		t.Fatalf("unmarshal delete output: %v", err)
+	}
+	if deleteOut.DeletedID != "mcp-machine" || deleteOut.Revision != "rev-after-delete" {
+		t.Fatalf("unexpected delete output: %+v", deleteOut)
+	}
+}
+

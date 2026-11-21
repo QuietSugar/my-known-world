@@ -372,3 +372,30 @@ func (g *Graph) Publish(n Node, relation Relation) error {
 	}
 	return nil
 }
+
+// RetireNode marks a non-Self node as retired, stamps LastConfirmed with the
+// current UTC timestamp, and verifies the graph remains connected.
+func (g *Graph) RetireNode(id string) (*Graph, error) {
+	old, ok := g.Node(id)
+	if !ok {
+		return nil, fmt.Errorf("node %q not found", id)
+	}
+	if old.Type == Self {
+		return nil, errors.New("Self cannot be retired")
+	}
+	retired := old
+	retired.Lifecycle = "retired"
+	now := time.Now().UTC()
+	retired.LastConfirmed = &now
+
+	candidate := cloneGraph(g)
+	candidate.nodes[id] = retired
+	if err := candidate.nodes[id].ValidateModelDetails(); err != nil {
+		return nil, err
+	}
+	if err := ensureConnected(candidate); err != nil {
+		return nil, err
+	}
+	return candidate, nil
+}
+

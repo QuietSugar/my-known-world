@@ -107,6 +107,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		switch {
+		case strings.HasPrefix(path, "/api/write/nodes/") && strings.HasSuffix(path, "/retire"):
+			rawID := strings.TrimSuffix(strings.TrimPrefix(path, "/api/write/nodes/"), "/retire")
+			id, err := url.PathUnescape(rawID)
+			if err != nil || id == "" {
+				writeError(w, http.StatusBadRequest, "invalid_id", "node id is invalid")
+				return
+			}
+			h.retireNodeAPI(w, r, id)
+			return
 		case path == "/api/write/nodes":
 			h.createNodeAPI(w, r)
 			return
@@ -229,7 +238,25 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid view parameter; must be 'summary' or 'full'")
 			return
 		}
+		includeRetired := true
+		if includeRetiredStr := q.Get("includeRetired"); includeRetiredStr != "" {
+			parsed, err := strconv.ParseBool(includeRetiredStr)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_request", "invalid includeRetired parameter; must be a boolean")
+				return
+			}
+			includeRetired = parsed
+		}
 		allNodes := g.Nodes()
+		if !includeRetired {
+			filtered := make([]graph.Node, 0, len(allNodes))
+			for _, n := range allNodes {
+				if n.Lifecycle != "retired" {
+					filtered = append(filtered, n)
+				}
+			}
+			allNodes = filtered
+		}
 		page, total, hasMore, nextCursor, err := paginateSlice(allNodes, func(n graph.Node) string { return n.ID }, q)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())

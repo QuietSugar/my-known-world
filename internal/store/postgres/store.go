@@ -863,9 +863,6 @@ func (s *Store) mutateWithOptimisticRevision(
 	expectedRevision string,
 	mutate func(current *graph.Graph) (*graph.Graph, any, error),
 ) (any, string, error) {
-	if expectedRevision == "" {
-		return nil, "", errors.New("expectedRevision is required")
-	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return nil, "", err
@@ -884,7 +881,7 @@ func (s *Store) mutateWithOptimisticRevision(
 	if err != nil {
 		return nil, "", err
 	}
-	if revision != expectedRevision {
+	if expectedRevision != "" && revision != expectedRevision {
 		return nil, "", errors.New("graph changed since this request was prepared; fetch the current revision and retry")
 	}
 	updated, result, err := mutate(current)
@@ -920,6 +917,9 @@ func (s *Store) mutateWithOptimisticRevision(
 }
 
 func (s *Store) PatchNode(ctx context.Context, id string, patch graph.Node, expectedRevision string) (graph.Node, string, error) {
+	if expectedRevision == "" {
+		return graph.Node{}, "", errors.New("expectedRevision is required")
+	}
 	var patchedNode graph.Node
 	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:patchNode", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
 		old, ok := current.Node(id)
@@ -991,7 +991,34 @@ func (s *Store) PatchNode(ctx context.Context, id string, patch graph.Node, expe
 	return patchedNode, rev, nil
 }
 
+func (s *Store) RetireNode(ctx context.Context, id string, expectedRevision string) (graph.Node, string, error) {
+	var retiredNode graph.Node
+	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:retireNode", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
+		old, ok := current.Node(id)
+		if !ok {
+			return nil, nil, fmt.Errorf("node %q not found", id)
+		}
+		if old.Type == graph.Self {
+			return nil, nil, errors.New("Self cannot be retired")
+		}
+		next, err := current.RetireNode(id)
+		if err != nil {
+			return nil, nil, err
+		}
+		retired, _ := next.Node(id)
+		retiredNode = retired
+		return next, retired, nil
+	})
+	if err != nil {
+		return graph.Node{}, "", err
+	}
+	return retiredNode, rev, nil
+}
+
 func (s *Store) DeleteNodeWithRevision(ctx context.Context, id string, expectedRevision string) (string, error) {
+	if expectedRevision == "" {
+		return "", errors.New("expectedRevision is required")
+	}
 	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:deleteNode", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
 		old, ok := current.Node(id)
 		if !ok {
@@ -1022,6 +1049,9 @@ func (s *Store) DeleteNodeWithRevision(ctx context.Context, id string, expectedR
 }
 
 func (s *Store) PatchRelation(ctx context.Context, id string, patch graph.Relation, expectedRevision string) (graph.Relation, string, error) {
+	if expectedRevision == "" {
+		return graph.Relation{}, "", errors.New("expectedRevision is required")
+	}
 	var patchedRel graph.Relation
 	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:patchRelation", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
 		old, ok := current.Relation(id)
@@ -1057,6 +1087,9 @@ func (s *Store) PatchRelation(ctx context.Context, id string, patch graph.Relati
 }
 
 func (s *Store) DeleteRelationWithRevision(ctx context.Context, id string, expectedRevision string) (string, error) {
+	if expectedRevision == "" {
+		return "", errors.New("expectedRevision is required")
+	}
 	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:deleteRelation", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
 		if _, ok := current.Relation(id); !ok {
 			return nil, nil, fmt.Errorf("relation %q not found", id)

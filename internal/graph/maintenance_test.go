@@ -46,3 +46,38 @@ func TestDeleteRelationRejectsDisconnectAndAddRelationIsChecked(t *testing.T) {
 		t.Fatalf("expected replacement relation remains: %+v", updated.Relations())
 	}
 }
+
+func TestRetireNode(t *testing.T) {
+	g := maintenanceFixture()
+	// 1. Retiring an existing node succeeds and updates lifecycle & timestamp
+	retiredGraph, err := g.RetireNode("m")
+	if err != nil {
+		t.Fatalf("RetireNode failed: %v", err)
+	}
+	node, ok := retiredGraph.Node("m")
+	if !ok {
+		t.Fatal("node m missing after retire")
+	}
+	if node.Lifecycle != "retired" {
+		t.Fatalf("expected lifecycle retired, got %q", node.Lifecycle)
+	}
+	if node.LastConfirmed == nil {
+		t.Fatal("expected non-nil LastConfirmed after retire")
+	}
+	// Receiver g is not mutated
+	origNode, _ := g.Node("m")
+	if origNode.Lifecycle == "retired" {
+		t.Fatal("RetireNode mutated receiver graph")
+	}
+
+	// 2. Retiring Self fails
+	if _, err = g.RetireNode("self"); err == nil {
+		t.Fatal("expected error retiring self")
+	}
+
+	// 3. Retiring unknown node fails
+	if _, err = g.RetireNode("nonexistent"); err == nil {
+		t.Fatal("expected error retiring nonexistent node")
+	}
+}
+

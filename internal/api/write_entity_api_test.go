@@ -71,6 +71,27 @@ func (m *entityWriterMock) DeleteNodeWithRevision(_ context.Context, id string, 
 	return m.revision, nil
 }
 
+func (m *entityWriterMock) RetireNode(_ context.Context, id string, expectedRevision string) (graph.Node, string, error) {
+	if expectedRevision != "" && expectedRevision != m.revision {
+		return graph.Node{}, "", errors.New("graph changed since this request was prepared")
+	}
+	old, ok := m.g.Node(id)
+	if !ok {
+		return graph.Node{}, "", fmt.Errorf("node %q not found", id)
+	}
+	if old.Type == graph.Self {
+		return graph.Node{}, "", errors.New("Self cannot be retired")
+	}
+	next, err := m.g.RetireNode(id)
+	if err != nil {
+		return graph.Node{}, "", err
+	}
+	m.g = next
+	m.revision = "rev-after-retire-node"
+	retired, _ := m.g.Node(id)
+	return retired, m.revision, nil
+}
+
 func (m *entityWriterMock) PatchRelation(_ context.Context, id string, patch graph.Relation, expectedRevision string) (graph.Relation, string, error) {
 	if expectedRevision != m.revision {
 		return graph.Relation{}, "", errors.New("graph changed since this request was prepared")
@@ -280,3 +301,156 @@ func TestWriteEntityAPIRelationLifecycle(t *testing.T) {
 		t.Fatalf("expected 200 OK deleting extra relation, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestWriteEntityAPIRetireNode(t *testing.T) {
+	g := fixture()
+	if err := g.AddNode(graph.Node{ID: "node-to-retire", Type: graph.Machine, Name: "Machine Active", Lifecycle: "active", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddRelation(graph.Relation{ID: "anchor-retire", From: "self", Predicate: graph.Owns, To: "node-to-retire"}); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := &entityWriterMock{memoryRepository: &memoryRepository{g: g}, revision: "rev-1"}
+	token := strings.Repeat("r", 32)
+	h := &Handler{Graph: g, Repository: repo, WriteToken: token}
+
+	// 1. Without auth token => 401
+	req := httptest.NewRequest(http.MethodPost, "/api/write/nodes/node-to-retire/retire", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 unauthorized, got %d", w.Code)
+	}
+
+	// 2. Non-existent node => 404
+	req = httptest.NewRequest(http.MethodPost, "/api/write/nodes/nonexistent/retire", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 not found, got %d", w.Code)
+	}
+
+	// 3. Retiring Self => 409
+	req = httptest.NewRequest(http.MethodPost, "/api/write/nodes/self/retire", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 conflict retiring self, got %d", w.Code)
+	}
+
+	// 4. Stale expectedRevision => 409
+	body, _ := json.Marshal(map[string]any{"expectedRevision": "stale-revision"})
+	req = httptest.NewRequest(http.MethodPost, "/api/write/nodes/node-to-retire/retire", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 conflict on stale revision, got %d", w.Code)
+	}
+
+	// 5. Successful retire with matching expectedRevision => 200
+	body, _ = json.Marshal(map[string]any{"expectedRevision": "rev-1"})
+	req = httptest.NewRequest(http.MethodPost, "/api/write/nodes/node-to-retire/retire", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK retiring node, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Node     graph.Node `json:"node"`
+		Revision string     `json:"revision"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal retire response: %v", err)
+	}
+	if resp.Node.Lifecycle != "retired" {
+		t.Fatalf("expected lifecycle retired, got %q", resp.Node.Lifecycle)
+	}
+	if resp.Revision != "rev-after-retire-node" {
+		t.Fatalf("unexpected revision: %q", resp.Revision)
+	}
+
+	// 6. Successful retire without expectedRevision body => 200
+	req = httptest.NewRequest(http.MethodPost, "/api/write/nodes/node-to-retire/retire", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK retiring node without expectedRevision, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetNodesIncludeRetiredFilter(t *testing.T) {
+	g := graph.New()
+	_ = g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
+	_ = g.Publish(graph.Node{ID: "active-node", Type: graph.Machine, Name: "Active Machine", Lifecycle: "active", ModelVersion: 1}, graph.Relation{ID: "a1", To: "active-node"})
+	_ = g.Publish(graph.Node{ID: "retired-node", Type: graph.Machine, Name: "Retired Machine", Lifecycle: "retired", ModelVersion: 1}, graph.Relation{ID: "a2", To: "retired-node"})
+
+	h := &Handler{Graph: g}
+
+	// 1. Default (no includeRetired param) includes all nodes (3 total)
+	req := httptest.NewRequest(http.MethodGet, "/api/nodes", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var respAll struct {
+		TotalCount int          `json:"totalCount"`
+		Items      []graph.Node `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &respAll)
+	if respAll.TotalCount != 3 {
+		t.Fatalf("expected totalCount 3, got %d", respAll.TotalCount)
+	}
+
+	// 2. includeRetired=true includes all nodes (3 total)
+	req = httptest.NewRequest(http.MethodGet, "/api/nodes?includeRetired=true", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var respTrue struct {
+		TotalCount int          `json:"totalCount"`
+		Items      []graph.Node `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &respTrue)
+	if respTrue.TotalCount != 3 {
+		t.Fatalf("expected totalCount 3, got %d", respTrue.TotalCount)
+	}
+
+	// 3. includeRetired=false excludes retired nodes (2 total: self and active-node)
+	req = httptest.NewRequest(http.MethodGet, "/api/nodes?includeRetired=false", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var respFalse struct {
+		TotalCount int          `json:"totalCount"`
+		Items      []graph.Node `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &respFalse)
+	if respFalse.TotalCount != 2 {
+		t.Fatalf("expected totalCount 2, got %d", respFalse.TotalCount)
+	}
+	for _, item := range respFalse.Items {
+		if item.Lifecycle == "retired" {
+			t.Fatalf("retired node returned when includeRetired=false: %+v", item)
+		}
+	}
+
+	// 4. Invalid includeRetired => 400
+	req = httptest.NewRequest(http.MethodGet, "/api/nodes?includeRetired=invalid", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid includeRetired, got %d", w.Code)
+	}
+}
+

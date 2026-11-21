@@ -14,6 +14,7 @@ type EntityWriter interface {
 	DeleteNodeWithRevision(ctx context.Context, id string, expectedRevision string) (string, error)
 	PatchRelation(ctx context.Context, id string, patch graph.Relation, expectedRevision string) (graph.Relation, string, error)
 	DeleteRelationWithRevision(ctx context.Context, id string, expectedRevision string) (string, error)
+	RetireNode(ctx context.Context, id string, expectedRevision string) (graph.Node, string, error)
 }
 
 func (h *Handler) patchNodeAPI(w http.ResponseWriter, r *http.Request, id string) {
@@ -155,3 +156,34 @@ func (h *Handler) deleteRelationAPI(w http.ResponseWriter, r *http.Request, id s
 		"revision": revision,
 	})
 }
+
+func (h *Handler) retireNodeAPI(w http.ResponseWriter, r *http.Request, id string) {
+	if !h.authorized(w, r) {
+		return
+	}
+	writer, ok := h.Repository.(EntityWriter)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "write_unavailable", "write API requires PostgreSQL")
+		return
+	}
+	var body struct {
+		ExpectedRevision string `json:"expectedRevision,omitempty"`
+	}
+	if r.Body != nil && r.ContentLength > 0 {
+		if err := decodeBody(w, r, createBodyLimit, &body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+	}
+	updated, revision, err := writer.RetireNode(r.Context(), id, body.ExpectedRevision)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusConflict, "write_rejected", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"node": updated, "revision": revision})
+}
+
