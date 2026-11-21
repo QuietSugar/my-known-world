@@ -3,14 +3,14 @@ export type EvidenceKind = 'unknown' | 'manual' | 'document' | 'observed' | 'der
 export type Certainty = 'unknown' | 'provisional' | 'confirmed' | 'disputed' | 'stale'
 export interface HardwareDetails { category?: string; model?: string; location?: string; specifications?: Record<string,string>; status?: string; accessReference?: string; maintenanceReference?: string }
 export interface ResourceClaim { kind: string; name: string; scope?: string; port?: number }
-export interface MachineDetails { hostname?: string; os?: string; ips?: string[]; network?: string; status?: string; accessMethod?: string; accessPrerequisites?: string[]; allowedOperations?: string[]; forbiddenOperations?: string[]; responsibilityBoundary?: string; resources?: ResourceClaim[]; lastVerified?: string }
+export interface MachineDetails { machineKind?: string; hostname?: string; os?: string; ips?: string[]; network?: string; status?: string; accessMethod?: string; accessPrerequisites?: string[]; allowedOperations?: string[]; forbiddenOperations?: string[]; responsibilityBoundary?: string; resources?: ResourceClaim[]; lastVerified?: string }
 export interface SoftwareProjectDetails { purpose?: string; languages?: string[]; form?: string; remoteRepository?: string; upstream?: string; maintenanceState?: string; recommendedVersion?: string; successorId?: string }
 export interface Endpoint { kind: string; address: string; port?: number }
-export interface SoftwareInstanceDetails { productName?: string; deploymentPath?: string; deploymentMethod?: string; runtimeIdentity?: string; endpoints?: Endpoint[]; configurationReferences?: string[]; deploymentState?: string; operationalState?: string; maintenanceState?: string; verificationResult?: string; verifiedAt?: string }
+export interface SoftwareInstanceDetails { productName?: string; domains?: string[]; ports?: number[]; deploymentPath?: string; deploymentMethod?: string; runtimeIdentity?: string; endpoints?: Endpoint[]; configurationReferences?: string[]; deploymentState?: string; operationalState?: string; maintenanceState?: string; verificationResult?: string; verifiedAt?: string }
 export interface CredentialDetails { account?: string; credentialType?: string; purpose?: string; scope?: string; accessReference?: string; rotationAt?: string; status?: string; lastVerified?: string }
 export interface ProductDetails { purpose?: string; commonConfigurationReference?: string; runbookReference?: string }
-export interface DocumentDetails { role?: string; authoritativeReference?: string; effective: boolean; lastVerified?: string; supersededBy?: string }
-export interface RunbookDetails { trigger?: string; preconditions?: string[]; stepsReference?: string; stopConditionReference?: string; rollbackReference?: string; verificationMethod?: string; lastVerified?: string; executableStatus?: string; approvalRequired: boolean }
+export interface DocumentDetails { role?: string; authoritativeReference?: string; effective?: boolean; lastVerified?: string; supersededBy?: string }
+export interface RunbookDetails { trigger?: string; preconditions?: string[]; stepsReference?: string; stopConditionReference?: string; rollbackReference?: string; verificationMethod?: string; lastVerified?: string; executableStatus?: string; approvalRequired?: boolean }
 export interface NetworkDetails { kind?:string; cidrs?:string[]; gatewayReference?:string; accessLocations?:string[]; vpnReference?:string; status?:string }
 export interface WorkItemDetails { kind?: string; status?: string; rationaleReference?: string; decisionEvidenceReference?: string }
 export interface Node { id: string; type: NodeType; name: string; lifecycle?: string; source: string; evidenceKind: EvidenceKind; certainty: Certainty; lastConfirmed?: string; modelVersion: number; candidateType?: NodeType; reviewStatus?: 'pending' | 'rejected'; reviewQuestions?: string[]; evidenceReference?: string; startedAt?: string; endedAt?: string; deployedVersion?: string; verificationAt?: string; verificationResult?: string; evidenceRef?: string; hardware?: HardwareDetails; machine?: MachineDetails; softwareProject?: SoftwareProjectDetails; softwareInstance?: SoftwareInstanceDetails; accountCredential?: CredentialDetails; product?: ProductDetails; document?: DocumentDetails; runbook?: RunbookDetails; workItem?: WorkItemDetails; network?:NetworkDetails }
@@ -29,6 +29,15 @@ export interface SyncSource { source: string; sourceHash: string; parserVersion:
 export interface FieldResolution { id:number; nodeId:string; fieldPath:string; selectedAssertionIds:string[]; rationaleReference:string; recordedAt:string }
 export interface ChangeEvent { id:number; runId?:number; source:string; entityType:string; entityId:string; action:'created'|'updated'|'stale'|'deleted'; recordedAt:string; snapshot?:unknown }
 export interface SyncRun { id: number; source: string; sourceHash: string; parserVersion: string; appliedAt: string; undone:boolean; preview: { addedNodes: string[]; updatedNodes: string[]; missingNodes: string[]; addedRelations: string[]; updatedRelations: string[]; missingRelations: string[]; conflicts: string[] } }
+export interface ProjectWorkspaceData {
+  project: Node
+  instances: Node[]
+  machines: Node[]
+  credentials: Node[]
+  documents: Node[]
+  workItems: Node[]
+  relations: Relation[]
+}
 
 async function readJSON<T>(url: string): Promise<T> {
   const response = await fetch(url, { headers: { Accept: 'application/json' } })
@@ -80,5 +89,6 @@ export const api = {
   impact: () => readJSON<{ items: Impact[] }>('/api/impact'),
   path: (id: string) => readJSON<{ nodes: Node[]; relations: Relation[] }>(`/api/path/${encodeURIComponent(id)}`),
   explore: (id: string,direction:string,depth:number,predicates:string[]) => readJSON<Exploration>(`/api/explore/${encodeURIComponent(id)}?direction=${encodeURIComponent(direction)}&depth=${depth}&predicates=${encodeURIComponent(predicates.join(','))}`),
+  projectWorkspace: (id: string) => readJSON<ProjectWorkspaceData>(`/api/workspace/projects/${encodeURIComponent(id)}`),
   health: () => readJSON<{ status: string }>('/healthz'),
 }
