@@ -30,8 +30,12 @@ def get_json(base: str, path: str):
 
 def check(base: str) -> int:
     assert get_json(base, "/healthz").get("status") == "ok", "health check is not ok"
-    nodes = get_json(base, "/api/nodes").get("items")
+    res = get_json(base, "/api/nodes")
+    nodes = res.get("items")
     assert isinstance(nodes, list), "nodes response must include an items array"
+    assert res.get("totalCount") == len(nodes), f"expected totalCount {len(nodes)}, got {res.get('totalCount')}"
+    assert res.get("count") == len(nodes), f"expected count {len(nodes)}, got {res.get('count')}"
+    assert res.get("hasMore") is False, "unpaged request must have hasMore=false"
     self_nodes = [node for node in nodes if node.get("type") == "Self"]
     assert len(self_nodes) == 1, f"expected exactly one Self node, found {len(self_nodes)}"
     self_id = self_nodes[0]["id"]

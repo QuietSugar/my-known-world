@@ -38,7 +38,7 @@ func pagedTestGraph() *graph.Graph {
 	return g
 }
 
-func TestNodesReadAPIBackwardCompatibilityWithoutQuery(t *testing.T) {
+func TestNodesReadAPIUnifiedStructureWithoutQuery(t *testing.T) {
 	g := pagedTestGraph()
 	h := Handler{Graph: g}
 	w := httptest.NewRecorder()
@@ -48,19 +48,21 @@ func TestNodesReadAPIBackwardCompatibilityWithoutQuery(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var raw map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+	var res struct {
+		Items      []graph.Node `json:"items"`
+		TotalCount int          `json:"totalCount"`
+		Count      int          `json:"count"`
+		HasMore    bool         `json:"hasMore"`
+		NextCursor string       `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
 		t.Fatal(err)
 	}
-	items, ok := raw["items"].([]any)
-	if !ok || len(items) != 26 { // self + 25 nodes
-		t.Fatalf("expected 26 items, got %d", len(items))
+	if len(res.Items) != 26 || res.TotalCount != 26 || res.Count != 26 || res.HasMore || res.NextCursor != "" {
+		t.Fatalf("expected unified standard response structure on empty query: %+v", res)
 	}
-	if _, exists := raw["totalCount"]; exists {
-		t.Fatalf("backward compatibility: totalCount should not be present when query string is empty")
-	}
-	if _, exists := raw["nextCursor"]; exists {
-		t.Fatalf("backward compatibility: nextCursor should not be present when query string is empty")
+	if w.Header().Get("X-Total-Count") != "26" {
+		t.Fatalf("expected X-Total-Count 26, got %s", w.Header().Get("X-Total-Count"))
 	}
 }
 
@@ -234,17 +236,24 @@ func TestRelationsPagination(t *testing.T) {
 	g := pagedTestGraph()
 	h := Handler{Graph: g}
 
-	// Backward compatibility without query
+	// Unified structure on empty query
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/relations", nil)
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var raw map[string]any
-	_ = json.Unmarshal(w.Body.Bytes(), &raw)
-	if _, ok := raw["totalCount"]; ok {
-		t.Fatalf("relations backward compatibility: totalCount should not be present without query")
+	var raw struct {
+		Items      []graph.Relation `json:"items"`
+		TotalCount int              `json:"totalCount"`
+		Count      int              `json:"count"`
+		HasMore    bool             `json:"hasMore"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Items) != 25 || raw.TotalCount != 25 || raw.Count != 25 || raw.HasMore {
+		t.Fatalf("expected standard unified relations structure: %+v", raw)
 	}
 
 	// Paged relations

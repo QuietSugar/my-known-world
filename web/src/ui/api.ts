@@ -48,9 +48,17 @@ async function writeJSON<T>(url: string, token: string, body?: unknown, method='
   return result as T
 }
 
+export interface PagedResult<T> {
+  items: T[]
+  totalCount: number
+  count: number
+  hasMore: boolean
+  nextCursor?: string
+}
+
 export const api = {
-  nodes: () => readJSON<{ items: Node[] }>('/api/nodes'),
-  relations: () => readJSON<{ items: Relation[] }>('/api/relations'),
+  nodes: () => readJSON<PagedResult<Node>>('/api/nodes'),
+  relations: () => readJSON<PagedResult<Relation>>('/api/relations'),
   assertions: (id: string) => readJSON<{ items: FieldAssertionView[] }>(`/api/nodes/${encodeURIComponent(id)}/assertions`),
   provisionals: () => readJSON<{ items: Node[] }>('/api/provisionals'),
   syncSources: () => readJSON<{ items: SyncSource[] }>('/api/sync/sources'),

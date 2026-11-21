@@ -79,7 +79,7 @@ maintainer needs to decide is listed under "Open work" and "Owner-only actions".
 3. **[DELIVERED] Paged read API and summary projection** (issue #48, closed).
    Added `limit` (max 500), stable ID-based `cursor`, and `offset` to `/api/nodes` and `/api/relations`,
    along with `view=summary` projection aligning with MCP `graph_query`, and internal paged streaming
-   in `myknownworld-materialize`. Full forward compatibility preserved for unparameterized queries.
+   in `myknownworld-materialize`. Unified consistent response structures across all queries without historical compatibility branches.
 4. **Single write token, no identity, no metrics.** No per-user authorization and
    no Prometheus/structured operational metrics. Both are architecture-level.
 5. **CMDB and graph entities are still unlinked** (deferred with #32).

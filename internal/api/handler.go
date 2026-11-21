@@ -224,10 +224,6 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/api/nodes":
 		q := r.URL.Query()
-		if len(q) == 0 {
-			writeJSON(w, http.StatusOK, map[string]any{"items": g.Nodes()})
-			return
-		}
 		view := q.Get("view")
 		if view != "" && view != "summary" && view != "full" {
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid view parameter; must be 'summary' or 'full'")
@@ -264,10 +260,6 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case path == "/api/relations":
 		q := r.URL.Query()
-		if len(q) == 0 {
-			writeJSON(w, http.StatusOK, map[string]any{"items": g.Relations()})
-			return
-		}
 		allRels := g.Relations()
 		page, total, hasMore, nextCursor, err := paginateSlice(allRels, func(r graph.Relation) string { return r.ID }, q)
 		if err != nil {

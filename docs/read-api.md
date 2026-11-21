@@ -6,21 +6,26 @@ The two core endpoints for reading the graph are:
 - `GET /api/nodes`
 - `GET /api/relations`
 
-## Forward compatibility
+## Unified response format
 
-When invoked with no query parameters, both endpoints return the entire graph
-as a single JSON document, matching existing caller expectations:
+Both endpoints return a consistent, self-describing JSON document across all requests,
+whether query parameters are supplied or omitted:
 
 ```json
 {
   "items": [
     {"id": "self", "type": "Self", "name": "Self", …},
     …
-  ]
+  ],
+  "totalCount": 26,
+  "count": 26,
+  "hasMore": false
 }
 ```
 
-No existing caller needs to change to stay functional.
+Every response also includes standard HTTP headers:
+- `X-Total-Count`: Total number of entities in the graph matching the scope.
+- `X-Next-Cursor`: Identifier of the last item in the page (present when `hasMore` is true).
 
 ## Pagination
 
