@@ -80,4 +80,3 @@ func TestRetireNode(t *testing.T) {
 		t.Fatal("expected error retiring nonexistent node")
 	}
 }
-

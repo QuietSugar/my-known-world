@@ -186,4 +186,3 @@ func (h *Handler) retireNodeAPI(w http.ResponseWriter, r *http.Request, id strin
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"node": updated, "revision": revision})
 }
-

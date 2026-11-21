@@ -453,4 +453,3 @@ func TestGetNodesIncludeRetiredFilter(t *testing.T) {
 		t.Fatalf("expected 400 for invalid includeRetired, got %d", w.Code)
 	}
 }
-

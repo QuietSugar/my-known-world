@@ -305,7 +305,7 @@ func TestMCPWritableToolsWhenConfigured(t *testing.T) {
 		names[tool.Name] = true
 	}
 	expectedTools := []string{
-		"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history",
+		"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history", "graph_search",
 		"graph_create_node", "graph_patch_node", "graph_retire_node", "graph_delete_node",
 	}
 	for _, name := range expectedTools {
@@ -313,8 +313,8 @@ func TestMCPWritableToolsWhenConfigured(t *testing.T) {
 			t.Fatalf("expected tool %q to be registered", name)
 		}
 	}
-	if len(names) != 10 {
-		t.Fatalf("expected exactly 10 tools, got %d: %v", len(names), names)
+	if len(names) != 11 {
+		t.Fatalf("expected exactly 11 tools, got %d: %v", len(names), names)
 	}
 
 	// 1. graph_create_node
@@ -418,4 +418,3 @@ func TestMCPWritableToolsWhenConfigured(t *testing.T) {
 		t.Fatalf("unexpected delete output: %+v", deleteOut)
 	}
 }
-

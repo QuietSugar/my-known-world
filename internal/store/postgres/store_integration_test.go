@@ -966,7 +966,13 @@ func TestDirectPatchAndDeleteMutations(t *testing.T) {
 	if retireHist[0].Action != "updated" {
 		t.Fatalf("expected updated action in history, got %s", retireHist[0].Action)
 	}
-	if retireHist[0].Source != "manual:retireNode" {
-		t.Fatalf("expected source manual:retireNode, got %s", retireHist[0].Source)
+
+	// Verify reversible operation was logged
+	ops, err := store.MutationOperations(ctx, 10)
+	if err != nil || len(ops) == 0 {
+		t.Fatalf("expected mutation operations: %v", err)
+	}
+	if ops[0].Action != "manual:retireNode" {
+		t.Fatalf("expected latest operation to be manual:retireNode, got %s", ops[0].Action)
 	}
 }

@@ -660,4 +660,3 @@ func (s *Server) deleteNode(ctx context.Context, _ *mcp.CallToolRequest, in Dele
 	}
 	return nil, DeleteNodeOutput{ID: in.ID, DeletedID: in.ID, Revision: rev}, nil
 }
-
