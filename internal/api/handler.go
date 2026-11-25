@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/QuietSugar/my-known-world/internal/cmdb"
 	"github.com/QuietSugar/my-known-world/internal/graph"
 )
 
@@ -85,10 +86,19 @@ type Repository interface {
 }
 
 type Handler struct {
-	Graph         *graph.Graph
-	SyncPreviewer SyncPreviewer
-	Repository    Repository
-	WriteToken    string
+	Graph          *graph.Graph
+	SyncPreviewer  SyncPreviewer
+	Repository     Repository
+	WriteToken     string
+	SecretProvider cmdb.SecretProvider
+	Cache          *SnapshotCache
+	TemplateStore  TemplateStore
+}
+
+func (h Handler) invalidateCache() {
+	if h.Cache != nil {
+		h.Cache.Invalidate()
+	}
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +107,21 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Match routes against the escaped path so an encoded slash remains inside
 	// one identifier segment until that segment is explicitly unescaped.
 	path := strings.TrimSuffix(r.URL.EscapedPath(), "/")
+	if strings.HasPrefix(path, "/api/workspace/projects/") && strings.Contains(path, "/templates") {
+		subPath := strings.TrimPrefix(path, "/api/workspace/projects/")
+		h.projectTemplatesRoute(w, r, subPath)
+		return
+	}
+	if strings.HasPrefix(path, "/api/workspace/projects/") && strings.Contains(path, "/export-static") {
+		g, err := h.currentGraph(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "graph_load_failed", err.Error())
+			return
+		}
+		subPath := strings.TrimPrefix(path, "/api/workspace/projects/")
+		h.projectExportStaticRoute(w, r, g, subPath)
+		return
+	}
 	if r.Method == http.MethodDelete && (strings.HasPrefix(path, "/api/nodes/") || strings.HasPrefix(path, "/api/relations/")) {
 		h.rejectUnpreviewedWrite(w, r)
 		return
@@ -167,6 +192,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case path == "/api/sync/policies":
 			h.rejectUnpreviewedWrite(w, r)
 			return
+		case path == "/api/credentials/sync":
+			h.credentialSyncAPI(w, r)
+			return
+		case path == "/api/credentials/upload-to-upstream" || path == "/api/credentials/upload":
+			h.credentialUploadAPI(w, r)
+			return
 		case strings.HasPrefix(path, "/api/provisionals/"):
 			h.rejectUnpreviewedWrite(w, r)
 			return
@@ -213,6 +244,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.Method != http.MethodGet {
+		// Storing a password is a write and authenticates itself; every other
+		// non-GET path is rejected here.
+		if r.URL.Path == "/api/credentials/secret" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+			h.credentialStoreAPI(w, r)
+			return
+		}
 		w.Header().Set("Allow", "GET, POST, PUT, DELETE, PATCH")
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "unsupported method")
 		return
@@ -231,6 +268,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case path == "/api/credentials/secret":
+		h.credentialSecretAPI(w, r)
+		return
+	case path == "/api/credentials/status":
+		h.credentialStatusAPI(w, r)
+		return
 	case path == "/metrics" || path == "/api/metrics":
 		h.metricsAPI(w, r, g)
 		return
@@ -517,7 +560,19 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) currentGraph(ctx context.Context) (*graph.Graph, error) {
 	if h.Repository != nil {
-		return h.Repository.LoadSnapshot(ctx)
+		if h.Cache != nil {
+			if cached := h.Cache.Get(); cached != nil {
+				return cached, nil
+			}
+		}
+		loaded, err := h.Repository.LoadSnapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if h.Cache != nil {
+			h.Cache.Set(loaded)
+		}
+		return loaded, nil
 	}
 	return h.Graph, nil
 }
@@ -621,6 +676,7 @@ func (h *Handler) applySourcePolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "policy_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "policy": body.Policy})
 }
 
@@ -678,6 +734,7 @@ func (h *Handler) applyAssertionResolution(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusConflict, "resolution_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -743,6 +800,7 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "sync_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{"applied": true, "preview": preview})
 }
 
@@ -883,6 +941,7 @@ func (h *Handler) applyUndo(w http.ResponseWriter, r *http.Request, path string)
 		writeError(w, http.StatusConflict, "undo_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]int64{"undone": id})
 }
 
@@ -1024,6 +1083,7 @@ func (h *Handler) review(w http.ResponseWriter, r *http.Request, path string) {
 			writeError(w, http.StatusConflict, "review_rejected", err.Error())
 			return
 		}
+		h.invalidateCache()
 		writeJSON(w, http.StatusOK, map[string]string{"status": "rejected", "id": id})
 		return
 	}
@@ -1050,6 +1110,7 @@ func (h *Handler) review(w http.ResponseWriter, r *http.Request, path string) {
 		writeError(w, http.StatusConflict, "review_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "classified", "id": id, "type": string(body.TargetType)})
 }
 
@@ -1149,4 +1210,174 @@ func paginateSlice[T any](items []T, getID func(T) string, values url.Values) ([
 		nextCursor = getID(page[len(page)-1])
 	}
 	return page, total, hasMore, nextCursor, nil
+}
+
+func (h Handler) credentialSecretAPI(w http.ResponseWriter, r *http.Request) {
+	if h.SecretProvider == nil {
+		writeError(w, http.StatusServiceUnavailable, "secret_provider_unavailable", "秘密提供者未配置或未启用")
+		return
+	}
+	// POST stores a password; GET reads it back. Writing always requires the
+	// write token so an operator action cannot be triggered by a bare link.
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
+		h.credentialStoreAPI(w, r)
+		return
+	}
+	ref := strings.TrimSpace(r.URL.Query().Get("ref"))
+	if ref == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "ref 参数不能为空")
+		return
+	}
+	res, err := h.SecretProvider.Read(r.Context(), ref)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "secret_not_found", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"ref":      ref,
+		"password": string(res.Value),
+		"opaqueId": res.Metadata.OpaqueID,
+	})
+}
+
+func (h Handler) credentialSyncAPI(w http.ResponseWriter, r *http.Request) {
+	if h.SecretProvider == nil {
+		writeError(w, http.StatusServiceUnavailable, "secret_provider_unavailable", "秘密提供者未配置或未启用")
+		return
+	}
+	type syncer interface {
+		Sync(context.Context) error
+	}
+	s, ok := h.SecretProvider.(syncer)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unsupported_operation", "当前秘密提供者不支持手动触发同步")
+		return
+	}
+	if err := s.Sync(r.Context()); err != nil {
+		writeError(w, http.StatusBadGateway, "sync_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"msg":    "密码库同步成功",
+	})
+}
+
+// credentialStoreAPI creates or rotates a stored password. It is only reachable
+// with the write token, because a stored password is a higher-value target than
+// graph content.
+func (h Handler) credentialStoreAPI(w http.ResponseWriter, r *http.Request) {
+	if !h.authorized(w, r) {
+		return
+	}
+	var body struct {
+		Ref      string `json:"ref"`
+		Password string `json:"password"`
+	}
+	if err := decodeBody(w, r, 32<<10, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	ref := strings.TrimSpace(body.Ref)
+	if ref == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "ref is required")
+		return
+	}
+	if strings.TrimSpace(body.Password) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "password is required")
+		return
+	}
+	req := cmdb.SecretRequest{Name: ref, Value: []byte(body.Password)}
+	// Existing refs are rotated in place so the UUID and references stay valid.
+	if _, err := h.SecretProvider.Read(r.Context(), ref); err == nil {
+		if _, err := h.SecretProvider.Update(r.Context(), ref, req); err != nil {
+			writeError(w, http.StatusInternalServerError, "store_failed", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ref": ref, "action": "updated"})
+		return
+	}
+	meta, err := h.SecretProvider.Create(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "store_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ref": ref, "action": "created", "opaqueId": meta.OpaqueID})
+}
+
+type uploadCredentialsRequest struct {
+	Refs     []string `json:"refs"`
+	Ref      string   `json:"ref"`
+	Upstream string   `json:"upstream"`
+}
+
+func (h Handler) credentialUploadAPI(w http.ResponseWriter, r *http.Request) {
+	if h.SecretProvider == nil {
+		writeError(w, http.StatusServiceUnavailable, "secret_provider_unavailable", "秘密提供者未配置或未启用")
+		return
+	}
+	type migrator interface {
+		MigrateToUpstream(ctx context.Context, refs []string, targetUpstream string) (cmdb.BatchMigrateResult, error)
+	}
+	m, ok := h.SecretProvider.(migrator)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unsupported_operation", "当前秘密提供者不支持上传上游")
+		return
+	}
+
+	var req uploadCredentialsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "无效的请求 JSON 体")
+		return
+	}
+	targets := req.Refs
+	if len(targets) == 0 && req.Ref != "" {
+		targets = []string{req.Ref}
+	}
+	if len(targets) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "请提供至少一个待上传凭据的 ref")
+		return
+	}
+
+	upstreamTarget := req.Upstream
+	if upstreamTarget == "" {
+		upstreamTarget = "bitwarden"
+	}
+
+	report, err := m.MigrateToUpstream(r.Context(), targets, upstreamTarget)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "migrate_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"report":  report,
+		"message": fmt.Sprintf("批量上传完成: 成功 %d, 失败 %d", report.Succeeded, report.Failed),
+	})
+}
+
+func (h Handler) credentialStatusAPI(w http.ResponseWriter, r *http.Request) {
+	if h.SecretProvider == nil {
+		writeError(w, http.StatusServiceUnavailable, "secret_provider_unavailable", "秘密提供者未配置")
+		return
+	}
+	type statusReporter interface {
+		GetStatusMap(ctx context.Context) (map[string]string, error)
+	}
+	s, ok := h.SecretProvider.(statusReporter)
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "managed": map[string]string{}})
+		return
+	}
+	m, err := s.GetStatusMap(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "status_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"managed": m,
+	})
 }
