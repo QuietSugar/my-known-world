@@ -31,7 +31,10 @@ const (
 var nodeTypes = map[NodeType]bool{Self: true, Hardware: true, Machine: true, SoftwareProject: true, SoftwareInstance: true, RunningPeriod: true, AccountCredential: true, Product: true, Document: true, Runbook: true, WorkItem: true, Network: true, ProvisionalObject: true}
 
 type Node struct {
-	ID                 string                    `json:"id"`
+	ID string `json:"id"`
+	// UUID is the permanent identifier, assigned by storage. It is empty for
+	// in-memory graphs that were never persisted.
+	UUID               string                    `json:"uuid,omitempty"`
 	Type               NodeType                  `json:"type"`
 	Name               string                    `json:"name"`
 	Lifecycle          string                    `json:"lifecycle,omitempty"`
@@ -63,7 +66,11 @@ type Node struct {
 }
 
 type NodeSummary struct {
-	ID           string       `json:"id"`
+	ID string `json:"id"`
+	// UUID is the entity's permanent identifier; it never changes across
+	// imports, renames, or restarts. ID remains the stable path-based key used
+	// for imports and is human-readable.
+	UUID         string       `json:"uuid,omitempty"`
 	Type         NodeType     `json:"type"`
 	Name         string       `json:"name"`
 	Lifecycle    string       `json:"lifecycle,omitempty"`
@@ -75,6 +82,7 @@ type NodeSummary struct {
 func (n Node) Summary() NodeSummary {
 	return NodeSummary{
 		ID:           n.ID,
+		UUID:         n.UUID,
 		Type:         n.Type,
 		Name:         n.Name,
 		Lifecycle:    n.Lifecycle,
@@ -417,8 +425,13 @@ func (n Node) MatchesSearch(needle string) bool {
 		return true
 	}
 	if n.Machine != nil {
-		if contains(n.Machine.Hostname) || contains(n.Machine.OS) {
+		if contains(n.Machine.Hostname) || contains(n.Machine.OS) || contains(n.Machine.Spec) {
 			return true
+		}
+		for _, role := range n.Machine.Roles {
+			if contains(role) {
+				return true
+			}
 		}
 		for _, ip := range n.Machine.IPs {
 			if contains(ip) {
@@ -437,8 +450,18 @@ func (n Node) MatchesSearch(needle string) bool {
 		}
 	}
 	if n.SoftwareInstance != nil {
-		if contains(n.SoftwareInstance.ProductName) || contains(n.SoftwareInstance.DeploymentPath) {
+		if contains(n.SoftwareInstance.ProductName) || contains(n.SoftwareInstance.DeploymentPath) || contains(n.SoftwareInstance.RuntimeIdentity) {
 			return true
+		}
+		for _, ref := range n.SoftwareInstance.ConfigurationReferences {
+			if contains(ref) {
+				return true
+			}
+		}
+		for _, note := range n.SoftwareInstance.Notes {
+			if contains(note) {
+				return true
+			}
 		}
 		for _, domain := range n.SoftwareInstance.Domains {
 			if contains(domain) {
