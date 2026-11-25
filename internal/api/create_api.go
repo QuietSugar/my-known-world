@@ -79,5 +79,6 @@ func (h *Handler) applyCreate(w http.ResponseWriter, r *http.Request, batch grap
 		writeError(w, http.StatusConflict, "create_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, status, map[string]any{"created": result, "revision": revision})
 }

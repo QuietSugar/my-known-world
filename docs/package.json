@@ -1,0 +1,13 @@
+{
+  "name": "my-known-world-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev --host 0.0.0.0 --port 5174",
+    "docs:build": "vitepress build",
+    "docs:preview": "vitepress preview --host 0.0.0.0 --port 5174"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

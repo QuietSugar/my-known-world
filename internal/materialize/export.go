@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -377,6 +378,13 @@ func sanitizeValue(value any, path string, notes *[]string) any {
 		return omittedValue
 	}
 	switch typed := value.(type) {
+	case float64:
+		// JSON numbers decode to float64; ports and other counts must export as
+		// integers or a round-trip turns 445 into 445.0.
+		if typed == math.Trunc(typed) && math.Abs(typed) < 1e15 {
+			return int64(typed)
+		}
+		return typed
 	case string:
 		if looksLikeSecretValue(typed) {
 			*notes = append(*notes, "secret-like value omitted: "+path)

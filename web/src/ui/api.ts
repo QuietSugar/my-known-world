@@ -3,14 +3,14 @@ export type EvidenceKind = 'unknown' | 'manual' | 'document' | 'observed' | 'der
 export type Certainty = 'unknown' | 'provisional' | 'confirmed' | 'disputed' | 'stale'
 export interface HardwareDetails { category?: string; model?: string; location?: string; specifications?: Record<string,string>; status?: string; accessReference?: string; maintenanceReference?: string }
 export interface ResourceClaim { kind: string; name: string; scope?: string; port?: number }
-export interface MachineDetails { machineKind?: string; hostname?: string; os?: string; ips?: string[]; network?: string; status?: string; accessMethod?: string; accessPrerequisites?: string[]; allowedOperations?: string[]; forbiddenOperations?: string[]; responsibilityBoundary?: string; resources?: ResourceClaim[]; lastVerified?: string }
+export interface MachineDetails { machineKind?: string; roles?: string[]; hostname?: string; os?: string; ips?: string[]; network?: string; status?: string; accessMethod?: string; accessPrerequisites?: string[]; allowedOperations?: string[]; forbiddenOperations?: string[]; responsibilityBoundary?: string; resources?: ResourceClaim[]; spec?: string; lastVerified?: string }
 export interface SoftwareProjectDetails { purpose?: string; languages?: string[]; form?: string; remoteRepository?: string; upstream?: string; maintenanceState?: string; recommendedVersion?: string; successorId?: string }
 export interface Endpoint { kind: string; address: string; port?: number }
-export interface SoftwareInstanceDetails { productName?: string; domains?: string[]; ports?: number[]; deploymentPath?: string; deploymentMethod?: string; runtimeIdentity?: string; endpoints?: Endpoint[]; configurationReferences?: string[]; deploymentState?: string; operationalState?: string; maintenanceState?: string; verificationResult?: string; verifiedAt?: string }
+export interface SoftwareInstanceDetails { productName?: string; domains?: string[]; ports?: number[]; deploymentPath?: string; deploymentMethod?: string; runtimeIdentity?: string; endpoints?: Endpoint[]; configurationReferences?: string[]; deploymentState?: string; operationalState?: string; maintenanceState?: string; notes?: string[]; verificationResult?: string; verifiedAt?: string }
 export interface CredentialDetails { account?: string; credentialType?: string; purpose?: string; scope?: string; accessReference?: string; rotationAt?: string; status?: string; lastVerified?: string }
 export interface ProductDetails { purpose?: string; commonConfigurationReference?: string; runbookReference?: string }
 export interface DocumentDetails { role?: string; authoritativeReference?: string; effective?: boolean; lastVerified?: string; supersededBy?: string }
-export interface RunbookDetails { trigger?: string; preconditions?: string[]; stepsReference?: string; stopConditionReference?: string; rollbackReference?: string; verificationMethod?: string; lastVerified?: string; executableStatus?: string; approvalRequired?: boolean }
+export interface RunbookDetails { scope?: string; trigger?: string; preconditions?: string[]; stepsReference?: string; stopConditionReference?: string; rollbackReference?: string; verificationMethod?: string; lastVerified?: string; executableStatus?: string; approvalRequired?: boolean }
 export interface NetworkDetails { kind?:string; cidrs?:string[]; gatewayReference?:string; accessLocations?:string[]; vpnReference?:string; status?:string }
 export interface WorkItemDetails { kind?: string; status?: string; rationaleReference?: string; decisionEvidenceReference?: string }
 export interface Node { id: string; type: NodeType; name: string; lifecycle?: string; source: string; evidenceKind: EvidenceKind; certainty: Certainty; lastConfirmed?: string; modelVersion: number; candidateType?: NodeType; reviewStatus?: 'pending' | 'rejected'; reviewQuestions?: string[]; evidenceReference?: string; startedAt?: string; endedAt?: string; deployedVersion?: string; verificationAt?: string; verificationResult?: string; evidenceRef?: string; hardware?: HardwareDetails; machine?: MachineDetails; softwareProject?: SoftwareProjectDetails; softwareInstance?: SoftwareInstanceDetails; accountCredential?: CredentialDetails; product?: ProductDetails; document?: DocumentDetails; runbook?: RunbookDetails; workItem?: WorkItemDetails; network?:NetworkDetails }
@@ -65,6 +65,46 @@ export interface PagedResult<T> {
   nextCursor?: string
 }
 
+export interface ProjectViewTemplate {
+  id: string
+  projectId: string
+  name: string
+  description?: string
+  layoutType: 'cards' | 'board' | 'table' | 'list'
+  config: {
+    groupBy?: 'environment' | 'machine' | 'none'
+    density?: 'compact' | 'comfortable'
+    visibleSections?: ('instances' | 'machines' | 'credentials' | 'documents')[]
+    showPort?: boolean
+    showHost?: boolean
+    showAccount?: boolean
+    highlightSecret?: boolean
+    filterEnv?: string
+    [key: string]: any
+  }
+  isDefault?: boolean
+  builtin?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ExportStaticResult {
+  status: string
+  projectId: string
+  projectSlug: string
+  filePath: string
+  historyPath: string
+  url: string
+  historyUrl: string
+  credentialCount: number
+  decryptedCount: number
+  generatedAt: string
+}
+
+export function getStoredToken(): string {
+  return sessionStorage.getItem('mkw-write-token') || localStorage.getItem('mkw-write-token') || ''
+}
+
 export const api = {
   nodes: () => readJSON<PagedResult<Node>>('/api/nodes'),
   relations: () => readJSON<PagedResult<Relation>>('/api/relations'),
@@ -90,5 +130,24 @@ export const api = {
   path: (id: string) => readJSON<{ nodes: Node[]; relations: Relation[] }>(`/api/path/${encodeURIComponent(id)}`),
   explore: (id: string,direction:string,depth:number,predicates:string[]) => readJSON<Exploration>(`/api/explore/${encodeURIComponent(id)}?direction=${encodeURIComponent(direction)}&depth=${depth}&predicates=${encodeURIComponent(predicates.join(','))}`),
   projectWorkspace: (id: string) => readJSON<ProjectWorkspaceData>(`/api/workspace/projects/${encodeURIComponent(id)}`),
+  credentialSecret: (ref: string) => readJSON<{ status: string; ref: string; password?: string; opaqueId?: string }>(`/api/credentials/secret?ref=${encodeURIComponent(ref)}`),
+  uploadCredentials: (refs: string[], upstream: 'bitwarden' | 'file' = 'file') =>
+    writeJSON<{ status: string; report: { total: number; succeeded: number; failed: number; upstream: string; results: { ref: string; newUUID?: string; accessReference?: string; success: boolean; error?: string }[] }; message: string }>(
+      '/api/credentials/upload-to-upstream',
+      '',
+      { refs, upstream }
+    ),
+  credentialStatus: () => readJSON<{ status: string; managed: Record<string, string> }>('/api/credentials/status'),
+  syncCredentials: () => writeJSON<{ status: string; msg: string }>('/api/credentials/sync', '', {}),
   health: () => readJSON<{ status: string }>('/healthz'),
+  getProjectTemplates: (projectId: string) =>
+    readJSON<ProjectViewTemplate[]>(`/api/workspace/projects/${encodeURIComponent(projectId)}/templates`),
+  saveProjectTemplate: (projectId: string, template: Partial<ProjectViewTemplate>) =>
+    writeJSON<ProjectViewTemplate>(`/api/workspace/projects/${encodeURIComponent(projectId)}/templates`, getStoredToken(), template, 'POST'),
+  updateProjectTemplate: (projectId: string, templateId: string, template: Partial<ProjectViewTemplate>) =>
+    writeJSON<ProjectViewTemplate>(`/api/workspace/projects/${encodeURIComponent(projectId)}/templates/${encodeURIComponent(templateId)}`, getStoredToken(), template, 'PUT'),
+  deleteProjectTemplate: (projectId: string, templateId: string) =>
+    writeJSON<{ status: string; id: string }>(`/api/workspace/projects/${encodeURIComponent(projectId)}/templates/${encodeURIComponent(templateId)}`, getStoredToken(), undefined, 'DELETE'),
+  exportStaticPage: (projectId: string) =>
+    writeJSON<ExportStaticResult>(`/api/workspace/projects/${encodeURIComponent(projectId)}/export-static`, '', {}),
 }

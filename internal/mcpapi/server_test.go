@@ -54,12 +54,12 @@ func TestMCPStreamableHTTPToolsAreTypedReadOnlyAndMatchGraphSemantics(t *testing
 	for _, tool := range listed.Tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history", "graph_search"} {
+	for _, name := range []string{"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history", "graph_search", "graph_feedback"} {
 		if !names[name] {
 			t.Fatalf("missing read tool %q", name)
 		}
 	}
-	if len(names) != 7 {
+	if len(names) != 8 {
 		t.Fatalf("unexpected tool registered (must not expose writes): %v", names)
 	}
 	empty, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "graph_query", Arguments: map[string]any{"text": "no matches"}})
@@ -279,6 +279,26 @@ func (w *testWriter) DeleteNodeWithRevision(_ context.Context, id string, expect
 	return w.revision, nil
 }
 
+func (w *testWriter) ReviewProvisional(_ context.Context, id string, target graph.NodeType) error {
+	next, err := w.g.ReviewProvisional(id, target)
+	if err != nil {
+		return err
+	}
+	w.g = next
+	w.revision = "rev-after-review"
+	return nil
+}
+
+func (w *testWriter) RejectProvisional(_ context.Context, id string) error {
+	next, err := w.g.RejectProvisional(id)
+	if err != nil {
+		return err
+	}
+	w.g = next
+	w.revision = "rev-after-reject"
+	return nil
+}
+
 func TestMCPWritableToolsWhenConfigured(t *testing.T) {
 	g := testGraph()
 	writer := &testWriter{g: g, revision: "rev-0"}
@@ -307,14 +327,15 @@ func TestMCPWritableToolsWhenConfigured(t *testing.T) {
 	expectedTools := []string{
 		"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history", "graph_search",
 		"graph_create_node", "graph_patch_node", "graph_retire_node", "graph_delete_node",
+		"graph_provisional_queue", "graph_review_provisional", "graph_feedback",
 	}
 	for _, name := range expectedTools {
 		if !names[name] {
 			t.Fatalf("expected tool %q to be registered", name)
 		}
 	}
-	if len(names) != 11 {
-		t.Fatalf("expected exactly 11 tools, got %d: %v", len(names), names)
+	if len(names) != len(expectedTools) {
+		t.Fatalf("expected exactly %d tools, got %d: %v", len(expectedTools), len(names), names)
 	}
 
 	// 1. graph_create_node
@@ -343,13 +364,60 @@ func TestMCPWritableToolsWhenConfigured(t *testing.T) {
 	if createOut.Node.ID != "mcp-machine" || createOut.Revision != "rev-after-create" {
 		t.Fatalf("unexpected create output: %+v", createOut)
 	}
+	// An agent proposal must not become authoritative without review.
+	if !createOut.Provisional || createOut.CandidateType != graph.Machine {
+		t.Fatalf("create should file into the review queue: %+v", createOut)
+	}
+	if createOut.Node.Type != graph.ProvisionalObject || createOut.Node.ReviewStatus != "pending" {
+		t.Fatalf("created node should be a pending provisional: %+v", createOut.Node)
+	}
+
+	// 1b. graph_provisional_queue must surface the pending item.
+	queueRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "graph_provisional_queue",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("graph_provisional_queue failed: %v", err)
+	}
+	queueJSON, _ := json.Marshal(queueRes.StructuredContent)
+	var queueOut ProvisionalQueueOutput
+	if err := json.Unmarshal(queueJSON, &queueOut); err != nil {
+		t.Fatalf("unmarshal queue output: %v", err)
+	}
+	if queueOut.Count != 1 || queueOut.Items[0].ID != "mcp-machine" || queueOut.Items[0].CandidateType != graph.Machine {
+		t.Fatalf("unexpected queue output: %+v", queueOut)
+	}
+
+	// 1c. Approving the review promotes it to the candidate type.
+	reviewRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "graph_review_provisional",
+		Arguments: map[string]any{
+			"id":     "mcp-machine",
+			"action": "approve",
+		},
+	})
+	if err != nil {
+		t.Fatalf("graph_review_provisional failed: %v", err)
+	}
+	reviewJSON, _ := json.Marshal(reviewRes.StructuredContent)
+	var reviewOut ReviewProvisionalOutput
+	if err := json.Unmarshal(reviewJSON, &reviewOut); err != nil {
+		t.Fatalf("unmarshal review output: %v", err)
+	}
+	if reviewOut.Status != "classified" || reviewOut.Type != graph.Machine {
+		t.Fatalf("unexpected review output: %+v", reviewOut)
+	}
+	if promoted, ok := writer.g.Node("mcp-machine"); !ok || promoted.Type != graph.Machine || promoted.ReviewStatus != "" {
+		t.Fatalf("approval should promote the node: %+v", promoted)
+	}
 
 	// 2. graph_patch_node
 	patchRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "graph_patch_node",
 		Arguments: map[string]any{
 			"id":               "mcp-machine",
-			"expectedRevision": "rev-after-create",
+			"expectedRevision": "rev-after-review",
 			"node": map[string]any{
 				"name": "MCP Machine Renamed",
 			},

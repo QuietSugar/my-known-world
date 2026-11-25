@@ -20,7 +20,6 @@ RUN VERSION_LDFLAG="-X github.com/QuietSugar/my-known-world/internal/version.Ver
     && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w ${VERSION_LDFLAG}" -o /out/myknownworld ./cmd/myknownworld \
     && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w ${VERSION_LDFLAG}" -o /out/myknownworld-mcp ./cmd/myknownworld-mcp \
     && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w ${VERSION_LDFLAG}" -o /out/myknownworld-markdown-import ./cmd/myknownworld-markdown-import \
-    && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w ${VERSION_LDFLAG}" -o /out/myknownworld-cmdb ./cmd/myknownworld-cmdb \
     && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w ${VERSION_LDFLAG}" -o /out/myknownworld-materialize ./cmd/myknownworld-materialize
 
 FROM alpine:3.22 AS runtime
@@ -38,7 +37,6 @@ WORKDIR /app
 COPY --from=go-build --chown=10001:10001 /out/myknownworld /usr/local/bin/myknownworld
 COPY --from=go-build --chown=10001:10001 /out/myknownworld-mcp /usr/local/bin/myknownworld-mcp
 COPY --from=go-build --chown=10001:10001 /out/myknownworld-markdown-import /usr/local/bin/myknownworld-markdown-import
-COPY --from=go-build --chown=10001:10001 /out/myknownworld-cmdb /usr/local/bin/myknownworld-cmdb
 COPY --from=go-build --chown=10001:10001 /out/myknownworld-materialize /usr/local/bin/myknownworld-materialize
 COPY --from=web-build --chown=10001:10001 /src/web/dist /app/web
 ENV ADDR=:8080 \

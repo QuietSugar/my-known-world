@@ -78,3 +78,36 @@ func TestNoPathForDisconnectedNode(t *testing.T) {
 		t.Fatal("disconnected node reported reachable")
 	}
 }
+
+func TestSearchMatchesMachineRole(t *testing.T) {
+	g := New()
+	if err := g.AddNode(Node{ID: "self", Type: Self, Name: "Me", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Publish(Node{
+		ID:           "devbox",
+		Type:         Machine,
+		Name:         "devbox",
+		ModelVersion: 1,
+		Machine:      &MachineDetails{Hostname: "devbox.example.test", Roles: []string{"development"}},
+	}, Relation{ID: "r-dev", To: "devbox"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Publish(Node{
+		ID:           "svcbox",
+		Type:         Machine,
+		Name:         "svcbox",
+		ModelVersion: 1,
+		Machine:      &MachineDetails{Hostname: "svcbox.example.test", Roles: []string{"deployment"}},
+	}, Relation{ID: "r-svc", To: "svcbox"}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits := g.Search("deployment", 10)
+	if len(hits) != 1 || hits[0].ID != "svcbox" {
+		t.Fatalf("role should be searchable, got %+v", hits)
+	}
+	if hits := g.Search("development", 10); len(hits) != 1 || hits[0].ID != "devbox" {
+		t.Fatalf("development role should match only the dev box, got %+v", hits)
+	}
+}

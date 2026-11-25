@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
 )
@@ -29,6 +30,22 @@ func AggregateProjectWorkspace(g *graph.Graph, projectID string) (ProjectWorkspa
 		return ProjectWorkspaceData{}, errors.New("graph is nil")
 	}
 	projNode, ok := g.Node(projectID)
+	if !ok && !strings.HasPrefix(projectID, "projects/") {
+		projNode, ok = g.Node("projects/" + projectID)
+		if ok {
+			projectID = "projects/" + projectID
+		}
+	}
+	if !ok {
+		for _, n := range g.Nodes() {
+			if n.Type == graph.SoftwareProject && (n.Name == projectID || strings.TrimPrefix(n.ID, "projects/") == projectID) {
+				projNode = n
+				projectID = n.ID
+				ok = true
+				break
+			}
+		}
+	}
 	if !ok {
 		return ProjectWorkspaceData{}, ErrProjectNotFound
 	}

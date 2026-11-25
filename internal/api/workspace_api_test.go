@@ -232,3 +232,34 @@ func TestProjectWorkspaceAPI_EmptyArraysSerializeCleanly(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectWorkspaceAPI_SmartIDMatching(t *testing.T) {
+	g := graph.New()
+	_ = g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
+	_ = g.Publish(graph.Node{
+		ID:           "projects/xasc",
+		Type:         graph.SoftwareProject,
+		Name:         "XASC Platform",
+		ModelVersion: 1,
+	}, graph.Relation{ID: "r-xasc", To: "projects/xasc"})
+
+	h := Handler{Graph: g}
+
+	// 1. Match by trimmed ID prefix ("xasc" -> "projects/xasc")
+	w1 := request(h, http.MethodGet, "/api/workspace/projects/xasc")
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 for 'xasc', got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// 2. Match by exact full ID
+	w2 := request(h, http.MethodGet, "/api/workspace/projects/projects/xasc")
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for 'projects/xasc', got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// 3. Match by Project Name
+	w3 := request(h, http.MethodGet, "/api/workspace/projects/XASC%20Platform")
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200 for name match, got %d: %s", w3.Code, w3.Body.String())
+	}
+}

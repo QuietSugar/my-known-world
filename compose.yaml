@@ -26,18 +26,20 @@ services:
     environment:
       ADDR: :8080
       WEB_ROOT: /app/web
+      STATIC_EXPORT_DIR: /data/static
       DATABASE_URL: postgresql://myknownworld:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/myknownworld?sslmode=disable
       MYKNOWNWORLD_SEED_DEMO: ${MYKNOWNWORLD_SEED_DEMO:-1}
       MYKNOWNWORLD_WRITE_TOKEN: ${MYKNOWNWORLD_WRITE_TOKEN:-}
-      CMDB_PROXY_TARGET: http://cmdb:8082
+      MCP_USAGE_LOG_FILE: ${MCP_USAGE_LOG_FILE:-/data/usage/mcp-usage.jsonl}
     ports:
       - target: 8080
         published: ${APP_PORT:-8080}
         host_ip: ${APP_HOST_IP:-127.0.0.1}
+    volumes:
+      - ./data/static:/data/static:rw
+      - ./data/usage:/data/usage:rw
     depends_on:
       db:
-        condition: service_healthy
-      cmdb:
         condition: service_healthy
     read_only: true
     tmpfs:
@@ -52,40 +54,6 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
-    restart: unless-stopped
-    networks: [backend]
-
-  cmdb:
-    image: ghcr.io/quietsugar/my-known-world:${IMAGE_TAG:-v0.1.1}
-    entrypoint: ["/sbin/tini", "--", "/usr/local/bin/myknownworld-cmdb"]
-    environment:
-      CMDB_ADDR: 0.0.0.0:8082
-      CMDB_DATABASE_URL: postgresql://myknownworld:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/myknownworld?sslmode=disable
-      CMDB_APP_TOKEN: ${CMDB_APP_TOKEN:?Set a distinct CMDB_APP_TOKEN in .env}
-      CMDB_SECRET_PROVIDER: ${CMDB_SECRET_PROVIDER:-}
-      CMDB_VAULT_DIR: /var/lib/mkw-vault
-      CMDB_VAULT_KEY_BASE64: ${CMDB_VAULT_KEY_BASE64:-}
-      CMDB_VAULT_KEY_FILE: ${CMDB_VAULT_KEY_FILE:-}
-      CMDB_SECRET_HTTP_URL: ${CMDB_SECRET_HTTP_URL:-}
-      CMDB_SECRET_HTTP_TOKEN: ${CMDB_SECRET_HTTP_TOKEN:-}
-      CMDB_SECRET_HTTP_ALLOW_INSECURE: ${CMDB_SECRET_HTTP_ALLOW_INSECURE:-}
-    depends_on:
-      db:
-        condition: service_healthy
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
-      - /var/lib/mkw-vault:rw,noexec,nosuid,size=16m,mode=0700,uid=10001,gid=10001
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
-    user: "10001:10001"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8082/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
     restart: unless-stopped
     networks: [backend]
 

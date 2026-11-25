@@ -188,3 +188,20 @@ func TestSecretKeyClassificationCoversCommonSecretNames(t *testing.T) {
 		}
 	}
 }
+
+func TestExportKeepsNumericFieldsAsIntegers(t *testing.T) {
+	notes := []string{}
+	cleaned := sanitizeValue(445, "ports[0]", &notes)
+	if _, isFloat := cleaned.(float64); isFloat {
+		t.Fatalf("integer input must not become a float: %T", cleaned)
+	}
+	// JSON decoding produces float64 for whole numbers; these must round-trip to int.
+	fromJSON := float64(445)
+	cleaned = sanitizeValue(fromJSON, "ports[0]", &notes)
+	if got, ok := cleaned.(int64); !ok || got != 445 {
+		t.Fatalf("whole float from JSON should become int64 445, got %T %v", cleaned, cleaned)
+	}
+	if got := sanitizeValue(1.5, "ratio", &notes); got != 1.5 {
+		t.Fatalf("fractional values must be preserved: %v", got)
+	}
+}

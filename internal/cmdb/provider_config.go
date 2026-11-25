@@ -3,6 +3,8 @@ package cmdb
 import (
 	"errors"
 	"strings"
+
+	"github.com/QuietSugar/my-known-world/internal/bitwarden"
 )
 
 // ProviderKind selects which secret provider an operator has configured.
@@ -10,9 +12,10 @@ import (
 type ProviderKind string
 
 const (
-	ProviderDisabled ProviderKind = ""
-	ProviderFile     ProviderKind = "file"
-	ProviderHTTP     ProviderKind = "http"
+	ProviderDisabled  ProviderKind = ""
+	ProviderFile      ProviderKind = "file"
+	ProviderHTTP      ProviderKind = "http"
+	ProviderBitwarden ProviderKind = "bitwarden"
 )
 
 // ProviderOptions is the deployment-supplied provider configuration. Key
@@ -27,6 +30,11 @@ type ProviderOptions struct {
 	URL               string
 	Token             string
 	AllowInsecureHTTP bool
+	// Bitwarden / Vaultwarden settings.
+	BitwardenServerURL      string
+	BitwardenClientID       string
+	BitwardenClientSecret   string
+	BitwardenMasterPassword string
 }
 
 // NewSecretProvider builds the configured provider. It returns (nil, nil) when
@@ -67,8 +75,20 @@ func NewSecretProvider(opts ProviderOptions) (SecretProvider, error) {
 			return nil, err
 		}
 		return provider, nil
+	case ProviderBitwarden:
+		cfg := bitwarden.Config{
+			ServerURL:      opts.BitwardenServerURL,
+			ClientID:       opts.BitwardenClientID,
+			ClientSecret:   opts.BitwardenClientSecret,
+			MasterPassword: opts.BitwardenMasterPassword,
+		}
+		if !cfg.Enabled() {
+			cfg = bitwarden.AutoDetectConfig()
+		}
+		provider := NewBitwardenProvider(cfg)
+		return provider, nil
 	default:
-		return nil, errors.New("unsupported CMDB_SECRET_PROVIDER value; supported values are file and http")
+		return nil, errors.New("unsupported CMDB_SECRET_PROVIDER value; supported values are file, http, and bitwarden")
 	}
 }
 

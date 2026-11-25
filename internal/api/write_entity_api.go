@@ -47,6 +47,7 @@ func (h *Handler) patchNodeAPI(w http.ResponseWriter, r *http.Request, id string
 		writeError(w, http.StatusConflict, "write_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{"node": updated, "revision": revision})
 }
 
@@ -81,6 +82,7 @@ func (h *Handler) deleteNodeAPI(w http.ResponseWriter, r *http.Request, id strin
 		writeError(w, http.StatusConflict, "write_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deleted":  map[string]any{"nodeId": id},
 		"revision": revision,
@@ -117,6 +119,7 @@ func (h *Handler) patchRelationAPI(w http.ResponseWriter, r *http.Request, id st
 		writeError(w, http.StatusConflict, "write_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{"relation": updated, "revision": revision})
 }
 
@@ -151,6 +154,7 @@ func (h *Handler) deleteRelationAPI(w http.ResponseWriter, r *http.Request, id s
 		writeError(w, http.StatusConflict, "write_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deleted":  map[string]any{"relationId": id},
 		"revision": revision,
@@ -184,5 +188,6 @@ func (h *Handler) retireNodeAPI(w http.ResponseWriter, r *http.Request, id strin
 		writeError(w, http.StatusConflict, "write_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{"node": updated, "revision": revision})
 }

@@ -25,7 +25,10 @@ type ResourceClaim struct {
 	Port  int    `json:"port,omitempty"`
 }
 type MachineDetails struct {
-	MachineKind            string          `json:"machineKind,omitempty"`
+	MachineKind string `json:"machineKind,omitempty"`
+	// Roles is the machine's job in the fleet (for example "development" or
+	// "deployment"); a machine may carry more than one.
+	Roles                  []string        `json:"roles,omitempty"`
 	Owned                  []string        `json:"owned,omitempty"`
 	Hostname               string          `json:"hostname,omitempty"`
 	OS                     string          `json:"os,omitempty"`
@@ -39,7 +42,11 @@ type MachineDetails struct {
 	ForbiddenOperations    []string        `json:"forbiddenOperations,omitempty"`
 	ResponsibilityBoundary string          `json:"responsibilityBoundary,omitempty"`
 	Resources              []ResourceClaim `json:"resources,omitempty"`
-	LastVerified           *time.Time      `json:"lastVerified,omitempty"`
+	// Spec is the machine's hardware allocation as written in prose (for
+	// example "12 vCPU / 12 GB RAM / 492 GB disk"). Free text because the
+	// source records it that way and it is read, not computed.
+	Spec         string     `json:"spec,omitempty"`
+	LastVerified *time.Time `json:"lastVerified,omitempty"`
 }
 type SoftwareProjectDetails struct {
 	Purpose            string   `json:"purpose,omitempty"`
@@ -68,8 +75,11 @@ type SoftwareInstanceDetails struct {
 	DeploymentState         string     `json:"deploymentState,omitempty"`
 	OperationalState        string     `json:"operationalState,omitempty"`
 	MaintenanceState        string     `json:"maintenanceState,omitempty"`
-	VerificationResult      string     `json:"verificationResult,omitempty"`
-	VerifiedAt              *time.Time `json:"verifiedAt,omitempty"`
+	// Notes carries the short operational facts a service page needs but that
+	// no typed field covers (restart policy, mount points, protocol).
+	Notes              []string   `json:"notes,omitempty"`
+	VerificationResult string     `json:"verificationResult,omitempty"`
+	VerifiedAt         *time.Time `json:"verifiedAt,omitempty"`
 }
 type AccountCredentialDetails struct {
 	Account         string     `json:"account,omitempty"`
@@ -296,4 +306,18 @@ func validateSafeRef(ref string) error {
 		return errors.New("reference is invalid or too long")
 	}
 	return nil
+}
+
+// ProjectViewTemplate represents a customizable or preset layout configuration for a project view.
+type ProjectViewTemplate struct {
+	ID          string          `json:"id"`
+	ProjectID   string          `json:"projectId"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	LayoutType  string          `json:"layoutType"` // 'cards' | 'board' | 'table' | 'list'
+	Config      json.RawMessage `json:"config"`
+	IsDefault   bool            `json:"isDefault"`
+	Builtin     bool            `json:"builtin,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt,omitempty"`
+	UpdatedAt   time.Time       `json:"updatedAt,omitempty"`
 }

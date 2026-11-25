@@ -31,11 +31,25 @@ type GraphWriter interface {
 	DeleteNodeWithRevision(ctx context.Context, id string, expectedRevision string) (string, error)
 }
 
+// provisionalReviewer is the optional capability that closes a pending review
+// item. The PostgreSQL store implements both methods.
+type provisionalReviewer interface {
+	ReviewProvisional(ctx context.Context, id string, target graph.NodeType) error
+	RejectProvisional(ctx context.Context, id string) error
+}
+
 type Server struct {
 	load       GraphLoader
 	history    HistoryReader
 	assertions AssertionReader
 	writer     GraphWriter
+	usage      *UsageLog
+}
+
+// WithUsageLog attaches the append-only usage log. A nil log disables logging.
+func (s *Server) WithUsageLog(log *UsageLog) *Server {
+	s.usage = log
+	return s
 }
 
 // NewServer builds the MCP server. implVersion is advertised as
@@ -46,17 +60,26 @@ func NewServer(implVersion string, load GraphLoader, history HistoryReader, asse
 
 // NewServerWithWriter builds an MCP server with optional mutation tools.
 func NewServerWithWriter(implVersion string, load GraphLoader, history HistoryReader, writer GraphWriter, assertionReaders ...AssertionReader) (*mcp.Server, error) {
+	return NewServerWithUsageLog(implVersion, load, history, writer, nil, assertionReaders...)
+}
+
+// NewServerWithUsageLog builds an MCP server and, when usage is non-nil,
+// records every tool call to it. Recording never changes behaviour.
+func NewServerWithUsageLog(implVersion string, load GraphLoader, history HistoryReader, writer GraphWriter, usage *UsageLog, assertionReaders ...AssertionReader) (*mcp.Server, error) {
 	if load == nil {
 		return nil, errors.New("graph loader is required")
 	}
 	if strings.TrimSpace(implVersion) == "" {
 		implVersion = "dev"
 	}
-	s := &Server{load: load, history: history, writer: writer}
+	s := &Server{load: load, history: history, writer: writer, usage: usage}
 	if len(assertionReaders) > 0 {
 		s.assertions = assertionReaders[0]
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "my-known-world", Version: implVersion}, nil)
+	if usage != nil {
+		srv.AddReceivingMiddleware(usageMiddleware(usage))
+	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_query", Description: "Filter graph node summaries by type, lifecycle, certainty, evidence, hosting machine, and case-insensitive text across safe modeled fields."}, s.query)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_search", Description: "Zero-resident-memory instant keyword search across node IDs, names, lifecycles, and typed fields."}, s.search)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_entity", Description: "Get typed node details, direct relations, Self path/category, and value-free assertion metadata."}, s.entity)
@@ -64,12 +87,24 @@ func NewServerWithWriter(implVersion string, load GraphLoader, history HistoryRe
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_impact", Description: "Return the existing confirmed operational impact paths from Self; knowsAbout is excluded."}, s.impact)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_explore", Description: "Explore a bounded subgraph using the domain graph's direction, depth, and predicate rules."}, s.explore)
 	mcp.AddTool(srv, &mcp.Tool{Name: "graph_history", Description: "Read append-only history for a node or relation ID."}, s.entityHistory)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "graph_feedback",
+		Description: "Optionally report whether a previous lookup was useful, so later offline analysis can tell which data earns its place. Never changes graph content and never alters query results.",
+	}, s.feedback)
 
 	if s.writer != nil {
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "graph_create_node",
-			Description: "Create a new graph node and anchor it to Self. Every published node requires connectivity from Self; specify anchor.predicate ('knowsAbout', 'owns', 'maintains', 'uses', or 'canOperate') to define the relation from Self. Returns created node and new graph revision.",
+			Description: "Create a new graph node anchored to Self. By default the node is filed into the review queue as a ProvisionalObject and does NOT enter the authoritative graph until a human approves it; the response carries provisional=true and the candidate type. Pass publish=true only when the user explicitly asked to write it straight through. Every published node requires connectivity from Self; specify anchor.predicate ('knowsAbout', 'owns', 'maintains', 'uses', or 'canOperate') to define the relation from Self.",
 		}, s.createNode)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "graph_provisional_queue",
+			Description: "List nodes awaiting human review (type ProvisionalObject with reviewStatus pending), including the candidate type each would become. These are invisible to the authoritative graph until reviewed.",
+		}, s.provisionalQueue)
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "graph_review_provisional",
+			Description: "Close a pending review item. action 'approve' promotes it to targetType (defaults to candidateType); action 'reject' keeps the record as history but marks it rejected. Approving is what makes an agent-proposed node authoritative.",
+		}, s.reviewProvisional)
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "graph_patch_node",
 			Description: "Update editable attributes of an existing node under optimistic concurrency control. ID and Type are immutable. Requires expectedRevision from a previous read. Self cannot be patched. Returns updated node and new revision.",
@@ -94,7 +129,13 @@ func NewHandler(implVersion string, load GraphLoader, history HistoryReader, ass
 
 // NewHandlerWithWriter wraps NewServerWithWriter in the streamable HTTP transport.
 func NewHandlerWithWriter(implVersion string, load GraphLoader, history HistoryReader, writer GraphWriter, assertionReaders ...AssertionReader) (*mcp.StreamableHTTPHandler, error) {
-	srv, err := NewServerWithWriter(implVersion, load, history, writer, assertionReaders...)
+	return NewHandlerWithWriterAndUsage(implVersion, load, history, writer, nil, assertionReaders...)
+}
+
+// NewHandlerWithWriterAndUsage is NewHandlerWithWriter with an append-only usage
+// log attached. A nil log disables recording.
+func NewHandlerWithWriterAndUsage(implVersion string, load GraphLoader, history HistoryReader, writer GraphWriter, usage *UsageLog, assertionReaders ...AssertionReader) (*mcp.StreamableHTTPHandler, error) {
+	srv, err := NewServerWithUsageLog(implVersion, load, history, writer, usage, assertionReaders...)
 	if err != nil {
 		return nil, err
 	}
@@ -546,11 +587,19 @@ func (d PatchNodeData) toNode(id string) graph.Node {
 type CreateNodeInput struct {
 	Node   CreateNodeData      `json:"node"`
 	Anchor *graph.CreateAnchor `json:"anchor,omitempty"`
+	// Publish writes the node straight into the authoritative graph. The zero
+	// value files it into the review queue instead, so an agent proposal cannot
+	// become authoritative without a human decision.
+	Publish bool `json:"publish,omitempty"`
 }
 
 type CreateNodeOutput struct {
-	Node     graph.Node `json:"node"`
-	Revision string     `json:"revision"`
+	Node        graph.Node `json:"node"`
+	Revision    string     `json:"revision"`
+	Provisional bool       `json:"provisional"`
+	// CandidateType is the node type the review queue will promote this to.
+	CandidateType graph.NodeType `json:"candidateType,omitempty"`
+	Note          string         `json:"note,omitempty"`
 }
 
 func (s *Server) createNode(ctx context.Context, _ *mcp.CallToolRequest, in CreateNodeInput) (*mcp.CallToolResult, CreateNodeOutput, error) {
@@ -561,6 +610,18 @@ func (s *Server) createNode(ctx context.Context, _ *mcp.CallToolRequest, in Crea
 		return nil, CreateNodeOutput{}, errors.New("node id is required")
 	}
 	node := in.Node.toNode()
+	provisional := !in.Publish
+	if provisional {
+		// The review queue holds the proposal verbatim and promotes it to
+		// candidateType once a human approves.
+		candidateType := node.Type
+		if candidateType == graph.Self || candidateType == graph.ProvisionalObject {
+			return nil, CreateNodeOutput{}, fmt.Errorf("node type %q cannot be proposed for review", candidateType)
+		}
+		node.CandidateType = candidateType
+		node.Type = graph.ProvisionalObject
+		node.ReviewStatus = "pending"
+	}
 	batch := graph.CreateBatch{
 		Nodes: []graph.CreateNodeRequest{{Node: node, Anchor: in.Anchor}},
 	}
@@ -577,7 +638,123 @@ func (s *Server) createNode(ctx context.Context, _ *mcp.CallToolRequest, in Crea
 			}
 		}
 	}
-	return nil, CreateNodeOutput{Node: createdNode, Revision: rev}, nil
+	out := CreateNodeOutput{Node: createdNode, Revision: rev, Provisional: provisional}
+	if provisional {
+		out.CandidateType = node.CandidateType
+		out.Note = "Filed into the review queue. It becomes authoritative only after graph_review_provisional approves it."
+	}
+	return nil, out, nil
+}
+
+type ProvisionalQueueInput struct {
+	CandidateType graph.NodeType `json:"candidateType,omitempty"`
+}
+
+type ProvisionalItem struct {
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	CandidateType  graph.NodeType `json:"candidateType"`
+	Source         string         `json:"source"`
+	Certainty      string         `json:"certainty"`
+	EvidenceKind   string         `json:"evidenceKind"`
+	ReviewQuestion []string       `json:"reviewQuestions,omitempty"`
+}
+
+type ProvisionalQueueOutput struct {
+	Items []ProvisionalItem `json:"items"`
+	Count int               `json:"count"`
+}
+
+func (s *Server) provisionalQueue(ctx context.Context, _ *mcp.CallToolRequest, in ProvisionalQueueInput) (*mcp.CallToolResult, ProvisionalQueueOutput, error) {
+	g, err := s.load(ctx)
+	if err != nil {
+		return nil, ProvisionalQueueOutput{}, err
+	}
+	items := []ProvisionalItem{}
+	for _, n := range g.ProvisionalQueue() {
+		if in.CandidateType != "" && n.CandidateType != in.CandidateType {
+			continue
+		}
+		items = append(items, ProvisionalItem{
+			ID:             n.ID,
+			Name:           n.Name,
+			CandidateType:  n.CandidateType,
+			Source:         n.Source,
+			Certainty:      string(n.Certainty),
+			EvidenceKind:   string(n.EvidenceKind),
+			ReviewQuestion: n.ReviewQuestions,
+		})
+	}
+	return nil, ProvisionalQueueOutput{Items: items, Count: len(items)}, nil
+}
+
+type ReviewProvisionalInput struct {
+	ID         string         `json:"id"`
+	Action     string         `json:"action"`
+	TargetType graph.NodeType `json:"targetType,omitempty"`
+}
+
+type ReviewProvisionalOutput struct {
+	ID     string         `json:"id"`
+	Action string         `json:"action"`
+	Status string         `json:"status"`
+	Type   graph.NodeType `json:"type,omitempty"`
+}
+
+func (s *Server) reviewProvisional(ctx context.Context, _ *mcp.CallToolRequest, in ReviewProvisionalInput) (*mcp.CallToolResult, ReviewProvisionalOutput, error) {
+	if s.writer == nil {
+		return nil, ReviewProvisionalOutput{}, errors.New("write operations are not enabled")
+	}
+	if strings.TrimSpace(in.ID) == "" {
+		return nil, ReviewProvisionalOutput{}, errors.New("id is required")
+	}
+	g, err := s.load(ctx)
+	if err != nil {
+		return nil, ReviewProvisionalOutput{}, err
+	}
+	node, ok := g.Node(in.ID)
+	if !ok || node.Type != graph.ProvisionalObject || node.ReviewStatus != "pending" {
+		return nil, ReviewProvisionalOutput{}, fmt.Errorf("no pending review item %q", in.ID)
+	}
+
+	var next *graph.Graph
+	switch in.Action {
+	case "approve":
+		next, err = g.ReviewProvisional(in.ID, in.TargetType)
+	case "reject":
+		next, err = g.RejectProvisional(in.ID)
+	default:
+		return nil, ReviewProvisionalOutput{}, errors.New("action must be approve or reject")
+	}
+	if err != nil {
+		return nil, ReviewProvisionalOutput{}, err
+	}
+	_ = next // validated in memory; the store persists the decision atomically
+
+	reviewer, ok := s.writer.(provisionalReviewer)
+	if !ok {
+		return nil, ReviewProvisionalOutput{}, errors.New("this writer does not support provisional review")
+	}
+	if in.Action == "reject" {
+		err = reviewer.RejectProvisional(ctx, in.ID)
+	} else {
+		err = reviewer.ReviewProvisional(ctx, in.ID, in.TargetType)
+	}
+	if err != nil {
+		return nil, ReviewProvisionalOutput{}, err
+	}
+
+	out := ReviewProvisionalOutput{ID: in.ID, Action: in.Action, Status: "classified"}
+	if in.Action == "reject" {
+		out.Status = "rejected"
+	} else {
+		target := in.TargetType
+		if target == "" {
+			target = node.CandidateType
+		}
+		out.Type = target
+	}
+	return nil, out, nil
 }
 
 type PatchNodeInput struct {

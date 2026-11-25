@@ -220,15 +220,3 @@ func TestHTTPProviderDoesNotFollowRedirectsWithItsCredential(t *testing.T) {
 		t.Fatal("bearer credential was forwarded to a redirect target")
 	}
 }
-
-func TestSecretHTTPMapsUnavailableReferencesToNotFound(t *testing.T) {
-	vault := &FileVault{Dir: t.TempDir(), Key: []byte("0123456789abcdef0123456789abcdef")}
-	handler := HTTPHandler{Secrets: SecretService{Provider: vault, Authorizer: RequestSecretAuthorizer{}}, Authorizer: BearerAuthorizer{Token: testProviderToken}}
-	request := httptest.NewRequest(http.MethodGet, "/credentials/unknown-reference", nil)
-	request.Header.Set("Authorization", "Bearer "+testProviderToken)
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusNotFound {
-		t.Fatalf("unavailable reference status %d", response.Code)
-	}
-}

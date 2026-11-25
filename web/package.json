@@ -1,15 +1,20 @@
 {
   "name": "my-known-world-web",
   "private": true,
-  "version": "0.0.7",
+  "version": "0.1.5",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "docs:dev": "cd ../docs && npm run docs:dev",
+    "docs:build": "cd ../docs && npm run docs:build",
+    "build:all": "npm run build && npm run docs:build && mkdir -p dist/docs && cp -r ../docs/.vitepress/dist/* dist/docs/"
   },
   "dependencies": {
+    "antd": "^6.7.1",
     "lucide-react": "latest",
+    "marked": "^18.2.1",
     "react": "latest",
     "react-dom": "latest"
   },
