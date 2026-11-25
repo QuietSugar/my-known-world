@@ -402,7 +402,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter host reference has incompatible mapped types"})
 					continue
 				}
-				rid := relationID(canonicalSourceID(parent.ID, cfg.IdentityMappings), graph.Hosts, canonicalSourceID(child.ID, cfg.IdentityMappings))
+				rid := relationID(canonicalSourceID(targetPath, cfg.IdentityMappings), graph.Hosts, canonicalSourceID(f.rel, cfg.IdentityMappings))
 				if !relationSeen[rid] {
 					relationSeen[rid] = true
 					report.Batch.Relations = append(report.Batch.Relations, graph.Relation{ID: rid, From: parent.ID, Predicate: graph.Hosts, To: child.ID, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
@@ -445,7 +445,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 				if predicate == graph.RelatedTo {
 					fromID, toID = node.ID, target.ID
 				}
-				rid := relationID(canonicalSourceID(fromID, cfg.IdentityMappings), predicate, canonicalSourceID(toID, cfg.IdentityMappings))
+				rid := relationID(canonicalSourceID(f.rel, cfg.IdentityMappings), predicate, canonicalSourceID(targetPath, cfg.IdentityMappings))
 				if relationSeen[rid] {
 					continue
 				}
@@ -484,7 +484,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			}
 			rid := strings.TrimSpace(ref.ID)
 			if rid == "" {
-				rid = relationID(canonicalSourceID(fromID, cfg.IdentityMappings), ref.Predicate, canonicalSourceID(toID, cfg.IdentityMappings))
+				rid = relationID(canonicalSourceID(f.rel, cfg.IdentityMappings), ref.Predicate, canonicalSourceID(targetPath, cfg.IdentityMappings))
 			}
 			if len(rid) > 512 || strings.ContainsAny(rid, "\r\n") {
 				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation identity is invalid"})
@@ -531,7 +531,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "self-referential Markdown link was ignored", Line: link.line})
 				continue
 			}
-			rid := relationID(canonicalSourceID(node.ID, cfg.IdentityMappings), graph.RelatedTo, canonicalSourceID(target.ID, cfg.IdentityMappings))
+			rid := relationID(canonicalSourceID(f.rel, cfg.IdentityMappings), graph.RelatedTo, canonicalSourceID(targetPath, cfg.IdentityMappings))
 			if relationSeen[rid] {
 				continue
 			}

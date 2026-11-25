@@ -5,7 +5,6 @@
 -- 路径映射到同一批 UUID，避免产生重复节点。
 --
 -- 幂等：重复执行时 legacy_id 已有值、id 已等于 uuid，UPDATE 影响 0 行而校验仍通过。
-BEGIN;
 
 -- 0. 记录旧路径，供 identityMappings 生成使用
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS legacy_id text;
@@ -53,4 +52,3 @@ BEGIN
   IF bad > 0 THEN RAISE EXCEPTION 'assertions with dangling node_id: %', bad; END IF;
 END $$;
 
-COMMIT;
