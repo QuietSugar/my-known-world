@@ -24,6 +24,17 @@ UPDATE field_assertions SET uuid = gen_random_uuid() WHERE uuid IS NULL;
 ALTER TABLE field_assertions ALTER COLUMN uuid SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS field_assertions_uuid_key ON field_assertions (uuid);
 
+-- cmdb_local_secrets 由应用在运行时创建（postgres_secret_provider.EnsureSchema），
+-- 不在这条 migration 链里；这里先建表，使全新部署也能跑通 migration。
+CREATE TABLE IF NOT EXISTS cmdb_local_secrets (
+    ref        text PRIMARY KEY,
+    opaque_id  text NOT NULL,
+    ciphertext bytea NOT NULL,
+    nonce      bytea NOT NULL,
+    metadata   jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
 ALTER TABLE cmdb_local_secrets ADD COLUMN IF NOT EXISTS uuid uuid DEFAULT gen_random_uuid();
 UPDATE cmdb_local_secrets SET uuid = gen_random_uuid() WHERE uuid IS NULL;
 ALTER TABLE cmdb_local_secrets ALTER COLUMN uuid SET NOT NULL;
