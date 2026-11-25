@@ -19,7 +19,7 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-const schemaVersion = 20
+const schemaVersion = 21
 
 var ErrEmptySnapshot = errors.New("database contains no graph snapshot")
 
@@ -54,7 +54,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	files := []string{"migrations/001_init.sql", "migrations/002_provenance.sql", "migrations/003_sync_state.sql", "migrations/004_identity_mappings.sql", "migrations/005_provisional_review.sql", "migrations/006_running_periods.sql", "migrations/007_sync_history.sql", "migrations/008_field_assertions.sql", "migrations/009_typed_model_details.sql", "migrations/010_graph_change_history.sql", "migrations/011_field_resolutions.sql", "migrations/012_source_policies.sql", "migrations/013_usage_relationships.sql", "migrations/014_network_model.sql", "migrations/015_reversible_operations.sql", "migrations/016_sync_undo_metadata.sql", "migrations/017_node_evidence_reference.sql", "migrations/018_markdown_relationships.sql", "migrations/019_project_view_templates.sql", "migrations/020_entity_uuids.sql"}
+	files := []string{"migrations/001_init.sql", "migrations/002_provenance.sql", "migrations/003_sync_state.sql", "migrations/004_identity_mappings.sql", "migrations/005_provisional_review.sql", "migrations/006_running_periods.sql", "migrations/007_sync_history.sql", "migrations/008_field_assertions.sql", "migrations/009_typed_model_details.sql", "migrations/010_graph_change_history.sql", "migrations/011_field_resolutions.sql", "migrations/012_source_policies.sql", "migrations/013_usage_relationships.sql", "migrations/014_network_model.sql", "migrations/015_reversible_operations.sql", "migrations/016_sync_undo_metadata.sql", "migrations/017_node_evidence_reference.sql", "migrations/018_markdown_relationships.sql", "migrations/019_project_view_templates.sql", "migrations/020_entity_uuids.sql", "migrations/021_business_columns_to_uuid.sql"}
 	if len(files) != schemaVersion {
 		return fmt.Errorf("migration list has %d entries, schemaVersion is %d", len(files), schemaVersion)
 	}
