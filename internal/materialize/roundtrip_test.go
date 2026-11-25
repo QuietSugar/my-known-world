@@ -56,13 +56,11 @@ func TestEverySupportedTypedModelRoundTripsThroughGeneratedImportConfig(t *testi
 	if len(imported.Batch.Nodes) != len(nodes) {
 		t.Fatalf("nodes imported=%d want=%d exclusions=%+v", len(imported.Batch.Nodes), len(nodes), imported.Exclusions)
 	}
+	// identityMappings now apply during import, so imported nodes already carry
+	// the stable ID; no reverse lookup through the file path is needed.
 	byStableID := map[string]graph.Node{}
 	for _, node := range imported.Batch.Nodes {
-		for _, mapping := range manifest.IdentityMappings {
-			if mapping.SourceID == node.ID {
-				byStableID[mapping.NodeID] = node
-			}
-		}
+		byStableID[node.ID] = node
 	}
 	for _, want := range nodes {
 		got, ok := byStableID[want.ID]
@@ -100,7 +98,16 @@ func TestEverySupportedTypedModelRoundTripsThroughGeneratedImportConfig(t *testi
 			t.Errorf("relation identity %s absent from manifest", relation.ID)
 			continue
 		}
-		if stableBySource[relation.From] != expected.From || stableBySource[relation.To] != expected.To || relation.Predicate != expected.Predicate {
+		// Imported relations already carry stable IDs; fall back to the path map
+		// only if a legacy importer left a file path in place.
+		from, to := relation.From, relation.To
+		if mapped, ok := stableBySource[from]; ok {
+			from = mapped
+		}
+		if mapped, ok := stableBySource[to]; ok {
+			to = mapped
+		}
+		if from != expected.From || to != expected.To || relation.Predicate != expected.Predicate {
 			t.Errorf("relation changed: imported=%+v manifest=%+v", relation, *expected)
 		}
 	}

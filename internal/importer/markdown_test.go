@@ -146,6 +146,112 @@ func TestMarkdownRigRetainsDistinctMachineKind(t *testing.T) {
 	}
 }
 
+func TestMarkdownMachineRetainsRole(t *testing.T) {
+	root := t.TempDir()
+	content := "---\ntype: rig\nname: Synthetic dev box\nhostname: devbox.example.test\nrole: Development\n---\nbody ignored\n"
+	if err := os.WriteFile(filepath.Join(root, "devbox.md"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 || report.Batch.Nodes[0].Machine == nil {
+		t.Fatalf("expected one imported machine node: %+v", report.Batch.Nodes)
+	}
+	roles := report.Batch.Nodes[0].Machine.Roles
+	if len(roles) != 1 || roles[0] != "development" {
+		t.Fatalf("role should be normalized and retained: %+v", roles)
+	}
+	if !assertionPresent(report.Batch.Assertions, "devbox.md", "machine.roles") {
+		t.Fatal("machine role should have typed evidence")
+	}
+}
+
+func TestMarkdownMachineAcceptsRoleList(t *testing.T) {
+	root := t.TempDir()
+	content := "---\ntype: rig\nname: Synthetic dual box\nhostname: dual.example.test\nroles:\n  - development\n  - deployment\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "dual.md"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Batch.Nodes) != 1 || report.Batch.Nodes[0].Machine == nil {
+		t.Fatalf("expected one imported machine node: %+v", report.Batch.Nodes)
+	}
+	roles := report.Batch.Nodes[0].Machine.Roles
+	if len(roles) != 2 || roles[0] != "development" || roles[1] != "deployment" {
+		t.Fatalf("roles list should be retained in order: %+v", roles)
+	}
+}
+
+func TestMarkdownServiceImportsContainerAndRecoveryAssets(t *testing.T) {
+	root := t.TempDir()
+	host := "---\ntype: rig\nname: example\nhostname: example.test\nstatus: active\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "example.md"), []byte(host), 0600); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\ntype: service\nname: synthetic\nhost: example.md\ndeploy_path: \"/srv/synthetic/\"\ncontainer: hall-synthetic\nrecovery_assets:\n  - compose.yml\n  - nginx.conf\nstatus: active\n---\n# body ignored\n"
+	if err := os.WriteFile(filepath.Join(root, "svc.md"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var svc *graph.Node
+	for i := range report.Batch.Nodes {
+		if report.Batch.Nodes[i].ID == "svc.md" {
+			svc = &report.Batch.Nodes[i]
+			break
+		}
+	}
+	if svc == nil || svc.SoftwareInstance == nil {
+		t.Fatalf("expected one service node: %+v exclusions=%+v", report.Batch.Nodes, report.Exclusions)
+	}
+	si := svc.SoftwareInstance
+	if si.RuntimeIdentity != "hall-synthetic" {
+		t.Fatalf("container should import into runtimeIdentity: %+v", si)
+	}
+	if len(si.ConfigurationReferences) != 2 || si.ConfigurationReferences[0] != "compose.yml" {
+		t.Fatalf("recovery assets should import into configurationReferences: %+v", si.ConfigurationReferences)
+	}
+	if !assertionPresent(report.Batch.Assertions, "svc.md", "softwareInstance.runtimeIdentity") {
+		t.Fatal("runtime identity should have typed evidence")
+	}
+	if !assertionPresent(report.Batch.Assertions, "svc.md", "softwareInstance.configurationReferences") {
+		t.Fatal("recovery assets should have typed evidence")
+	}
+}
+
+func TestMarkdownServiceAcceptsQuotedPorts(t *testing.T) {
+	root := t.TempDir()
+	host := "---\ntype: rig\nname: example\nhostname: example.test\nstatus: active\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "example.md"), []byte(host), 0600); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\ntype: service\nname: quoted\nhost: example.md\nports:\n  - \"5432\"\nstatus: active\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "quoted.md"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := MarkdownFrontmatter(root, markdownConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range report.Batch.Nodes {
+		if n.ID != "quoted.md" {
+			continue
+		}
+		if n.SoftwareInstance == nil || len(n.SoftwareInstance.Ports) != 1 || n.SoftwareInstance.Ports[0] != 5432 {
+			t.Fatalf("quoted ports should normalise to integers: %+v", n.SoftwareInstance)
+		}
+		return
+	}
+	t.Fatalf("quoted service was excluded: %+v", report.Exclusions)
+}
+
 func TestMarkdownHardwareImportsLocationAndTypedEvidence(t *testing.T) {
 	root := t.TempDir()
 	content := "---\ntype: hardware\nname: Synthetic host\ncategory: server\nmodel: Example Model\nlocation: lab-rack-2\nstatus: active\n---\nbody ignored\n"
@@ -545,5 +651,58 @@ ip: definitely-not-an-address
 	}
 	if !strings.Contains(string(body), "invalid IP address excluded") {
 		t.Fatal("invalid IP exclusion is missing")
+	}
+}
+
+func TestIdentityMappingReplacesFilePathAsNodeID(t *testing.T) {
+	root := t.TempDir()
+	host := "---\ntype: rig\nname: box\nhostname: box.test\nstatus: active\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "box.md"), []byte(host), 0600); err != nil {
+		t.Fatal(err)
+	}
+	svc := "---\ntype: service\nname: web\nhost: box.md\nstatus: active\n---\n"
+	if err := os.WriteFile(filepath.Join(root, "web.md"), []byte(svc), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := markdownConfig()
+	const webUUID = "3f9a1c2e-0000-4000-8000-000000000001"
+	const boxUUID = "3f9a1c2e-0000-4000-8000-000000000002"
+	cfg.IdentityMappings = []graph.IdentityMapping{
+		{SourceID: "web.md", NodeID: webUUID},
+		{SourceID: "box.md", NodeID: boxUUID},
+	}
+	report, err := MarkdownFrontmatter(root, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids := map[string]bool{}
+	for _, n := range report.Batch.Nodes {
+		ids[n.ID] = true
+	}
+	if !ids[webUUID] || !ids[boxUUID] {
+		t.Fatalf("mapped nodes should carry UUIDs, got %v", ids)
+	}
+	if ids["web.md"] || ids["box.md"] {
+		t.Fatalf("file paths must not remain as node IDs: %v", ids)
+	}
+
+	for _, a := range report.Batch.Assertions {
+		if a.NodeID == "web.md" || a.NodeID == "box.md" {
+			t.Fatalf("assertion must reference the mapped ID, got %q", a.NodeID)
+		}
+	}
+	found := false
+	for _, r := range report.Batch.Relations {
+		if r.Predicate != graph.Hosts {
+			continue
+		}
+		if r.From != boxUUID || r.To != webUUID {
+			t.Fatalf("hosts relation should use mapped IDs, got %s -> %s", r.From, r.To)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("expected a hosts relation between the mapped nodes")
 	}
 }

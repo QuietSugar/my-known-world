@@ -224,6 +224,9 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 		}
 	}
 	mapped := map[string]graph.Node{}
+	// mappedByCanonical indexes by the ID actually written to the graph, which
+	// differs from the file path when identityMappings remap a source.
+	mappedByCanonical := map[string]graph.Node{}
 	for _, f := range files {
 		if _, hasDomain := f.data["domain"]; hasDomain {
 			if _, hasDomains := f.data["domains"]; hasDomains {
@@ -248,7 +251,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 		if name == "" {
 			name = strings.TrimSuffix(path.Base(f.rel), path.Ext(f.rel))
 		}
-		node := graph.Node{ID: f.rel, Name: name, Lifecycle: firstString(f.data, "lifecycle", "status"), Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1}
+		node := graph.Node{ID: canonicalSourceID(f.rel, cfg.IdentityMappings), Name: name, Lifecycle: firstString(f.data, "lifecycle", "status"), Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1}
 		if !hasMapping {
 			node.Type = graph.ProvisionalObject
 			node.Certainty = graph.CertaintyProvisional
@@ -309,9 +312,10 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 					continue
 				}
 				ref := f.rel
-				report.Batch.Assertions = append(report.Batch.Assertions, graph.FieldAssertion{ID: assertionID(canonicalSourceID(f.rel, cfg.IdentityMappings), field.path), NodeID: f.rel, FieldPath: field.path, ValueHash: graph.HashFieldValue(string(raw)), Reference: ref, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
+				report.Batch.Assertions = append(report.Batch.Assertions, graph.FieldAssertion{ID: assertionID(canonicalSourceID(f.rel, cfg.IdentityMappings), field.path), NodeID: canonicalSourceID(f.rel, cfg.IdentityMappings), FieldPath: field.path, ValueHash: graph.HashFieldValue(string(raw)), Reference: ref, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
 			}
 			mapped[f.rel] = node
+			mappedByCanonical[canonicalSourceID(f.rel, cfg.IdentityMappings)] = node
 		}
 		report.Batch.Nodes = append(report.Batch.Nodes, node)
 	}
@@ -354,16 +358,22 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 				delete(mapped, f.rel)
 			}
 		}
+		excludedCanonical := map[string]bool{}
+		for rel, reason := range invalidRecords {
+			if reason != "" {
+				excludedCanonical[canonicalSourceID(rel, cfg.IdentityMappings)] = true
+			}
+		}
 		validNodes := report.Batch.Nodes[:0]
 		for _, node := range report.Batch.Nodes {
-			if invalidRecords[node.ID] == "" {
+			if !excludedCanonical[node.ID] {
 				validNodes = append(validNodes, node)
 			}
 		}
 		report.Batch.Nodes = validNodes
 		validAssertions := report.Batch.Assertions[:0]
 		for _, assertion := range report.Batch.Assertions {
-			if invalidRecords[assertion.NodeID] == "" {
+			if !excludedCanonical[assertion.NodeID] {
 				validAssertions = append(validAssertions, assertion)
 			}
 		}
@@ -485,11 +495,11 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			}
 			candidate := graph.Relation{ID: rid, From: fromID, Predicate: ref.Predicate, To: toID, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed}
 			check := graph.New()
-			if err := check.AddNode(mapped[fromID]); err != nil {
+			if err := check.AddNode(mappedByCanonical[fromID]); err != nil {
 				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation endpoint is invalid"})
 				continue
 			}
-			if err := check.AddNode(mapped[toID]); err != nil {
+			if err := check.AddNode(mappedByCanonical[toID]); err != nil {
 				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "frontmatter relation endpoint is invalid"})
 				continue
 			}
@@ -900,7 +910,27 @@ func decodeMarkdownModelDetails(fields map[string]any, node *graph.Node) error {
 	}
 	camel := make(map[string]any, len(fields))
 	for key, value := range fields {
-		camel[snakeToCamel(key)] = value
+		name := snakeToCamel(key)
+		// Frontmatter uses short, operator-friendly names for two fields whose
+		// model names are longer; map them before the strict decode.
+		switch name {
+		case "container":
+			name = "runtimeIdentity"
+		case "recoveryAssets":
+			name = "configurationReferences"
+		case "spec":
+			name = "spec"
+		case "notes":
+			name = "notes"
+		}
+		camel[name] = value
+	}
+	// Frontmatter ports are often quoted strings; the model stores integers, so
+	// normalise before the strict decode or the whole record is rejected.
+	if raw, ok := camel["ports"]; ok {
+		if ports, valid := portList(raw); valid {
+			camel["ports"] = ports
+		}
 	}
 	data, err := json.Marshal(camel)
 	if err != nil {
@@ -953,6 +983,25 @@ func machineDetails(m map[string]any, kindField, configuredKind string) (*graph.
 	d.OperationConstraints = stringList(m["constraints"])
 	d.AllowedOperations = stringList(m["allowed_operations"])
 	d.ForbiddenOperations = stringList(m["forbidden_operations"])
+	d.Spec = firstString(m, "spec")
+	// role/roles is the machine's job in the fleet, kept verbatim because it is
+	// free-form operator vocabulary rather than a closed enumeration.
+	for _, raw := range append(stringList(m["role"]), stringList(m["roles"])...) {
+		role := strings.ToLower(strings.TrimSpace(raw))
+		if role == "" {
+			continue
+		}
+		duplicate := false
+		for _, existing := range d.Roles {
+			if existing == role {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			d.Roles = append(d.Roles, role)
+		}
+	}
 	reasons := []string{}
 	if invalidKind {
 		reasons = append(reasons, "invalid machine kind excluded")
@@ -968,6 +1017,9 @@ func instanceDetails(m map[string]any) (*graph.SoftwareInstanceDetails, string) 
 		domains = m["domain"]
 	}
 	d := &graph.SoftwareInstanceDetails{DeploymentPath: firstString(m, "deploy_path", "deployment_path"), Domains: stringList(domains), OperationalState: firstString(m, "status")}
+	d.Notes = stringList(m["notes"])
+	// container and recovery_assets reach the model through the frontmatter
+	// aliases in decodeMarkdownModelDetails, so they are not set here.
 	if rawPorts, exists := m["ports"]; exists {
 		ports, ok := portList(rawPorts)
 		if !ok {
@@ -1045,6 +1097,12 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 		addString("status", "machine.status")
 		if d.MachineKind != "" {
 			add("machine.machineKind", d.MachineKind)
+		}
+		if d.Spec != "" {
+			add("machine.spec", d.Spec)
+		}
+		if len(d.Roles) > 0 {
+			add("machine.roles", append([]string{}, d.Roles...))
 		}
 		if len(d.IPs) > 0 {
 			add("machine.ips", append([]string{}, d.IPs...))
@@ -1144,6 +1202,15 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 		}
 		if d.OperationalState != "" {
 			add("softwareInstance.operationalState", d.OperationalState)
+		}
+		if d.RuntimeIdentity != "" {
+			add("softwareInstance.runtimeIdentity", d.RuntimeIdentity)
+		}
+		if len(d.ConfigurationReferences) > 0 {
+			add("softwareInstance.configurationReferences", append([]string{}, d.ConfigurationReferences...))
+		}
+		if len(d.Notes) > 0 {
+			add("softwareInstance.notes", append([]string{}, d.Notes...))
 		}
 	}
 	addAllPresentTypedFields(&out, n, m)
