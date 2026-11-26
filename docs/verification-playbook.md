@@ -160,6 +160,52 @@ ssh svc "docker exec hall-pgsql pg_dump -U myknownworld -d myknownworld \
 ssh svc "docker exec -i hall-pgsql pg_restore --list" < <dump> | grep -c "TABLE DATA"
 ```
 
+## 七之二、验证写入时的坑
+
+回读验证是写完数据后唯一的确认手段，但它本身会产生假象。以下是实际踩过的。
+
+### 写入后必须等缓存失效
+
+服务端有快照缓存（`internal/api/cache.go`）。**2026-11-26 之前，`applyManualMutation`
+写入成功后没有调用 `invalidateCache`**，导致写完立刻回读会拿到写入前的数据。
+
+现象：apply 返回 200，回读却发现字段没变。当时误判为「`go run` 用了缓存二进制」，
+重装重跑了几轮，真实原因是服务端缓存没失效。
+
+已修复（`createNode` / `updateNode` 同样缺这一步，一并补上），并有
+`TestApplyManualMutationInvalidatesCache` 守住。**若再次遇到「写完读不到」，先查
+`invalidateCache`，不要先怀疑构建缓存。**
+
+### 本地库结构可能落后于生产
+
+本地开发库若曾用旧代码建过，`schema_migrations` 会记着旧版本号。而 `Migrate` 依据
+版本号跳过已应用的迁移——旧结构的表不会因为代码更新而自动修正。
+
+2026-11-26 的表现是 apply 报 `null value in column "before_state"`：撤销功能下线时
+删除了该列，本地库仍带着它且 NOT NULL。
+
+核对方式：
+
+```bash
+# 本地与生产的版本、关键表结构应当一致
+docker exec hall-mkw-test-db psql -U myknownworld -d myknownworld -tAc \
+  "SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations"
+ssh svc "docker exec -i hall-pgsql psql -U myknownworld -d myknownworld -tAc \
+  \"SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations\""
+```
+
+### 测试要能反向验证
+
+写完测试后把修复去掉，确认它会失败。否则测的可能是「它本来就能过」。
+
+本轮两个测试都做过这一步：`TestPatchMergesNestedDetails`（去掉合并 → 字段丢失）、
+`TestApplyManualMutationInvalidatesCache`（去掉失效 → 读到旧值）。
+
+### 两条写入路径都要测
+
+Web 走 `graph.ApplyManualMutation`，MCP 走 `store.PatchNode`。2026-11-26 只修了后者
+就以为完成，实际 Web 路径仍会丢字段。**改了写入逻辑，两条都要验证。**
+
 ## 八、待办：校验体系需要收敛（2026-11-26 记录）
 
 现状能用，但**不优雅**。分散在两个仓库、四个脚本，没有统一入口，也存在覆盖盲区。
