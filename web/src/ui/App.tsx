@@ -37,7 +37,6 @@ import {
   type SyncRun,
   type SyncSource,
   type SourcePolicy,
-  type MutationOperation,
   type ManualMutation,
   type MutationPlan
 } from './api'
@@ -822,7 +821,6 @@ export function App() {
                 <>
                   <SourcePolicyPanel />
                   <SyncBatchPanel onApplied={refresh} />
-                  <OperationHistoryPanel onUndone={refresh} />
                 </>
               )}
               {view === 'explore' && <GraphExplorer nodes={nodes} onSelect={focus} />}
@@ -1556,60 +1554,6 @@ function ModelDetailsPanel({ node }: { node: Node }) {
   )
 }
 
-function OperationHistoryPanel({ onUndone }: { onUndone: () => Promise<void> }) {
-  const [items, setItems] = useState<MutationOperation[]>([])
-  const [message, setMessage] = useState('')
-  const load = () => api.mutationOperations().then(result => setItems(result.items)).catch(cause => setMessage(cause instanceof Error ? cause.message : '操作历史不可用'))
-  useEffect(() => { void load() }, [])
-
-  const undo = async (item: MutationOperation) => {
-    if (!item.reversible) return
-    let token = sessionStorage.getItem('mkw-write-token') || window.prompt('请输入 MYKNOWNWORLD_WRITE_TOKEN')
-    if (!token) return
-    sessionStorage.setItem('mkw-write-token', token)
-    try {
-      const plan = await api.previewUndoOperation(item.id)
-      if (
-        !window.confirm(
-          `服务端预览撤回操作 #${item.id}（${item.action}）。仅当当前图谱仍与该操作结果一致时可撤回。版本 ${plan.expectedRevision.slice(0, 12)}…\n确认撤回？`
-        )
-      ) return
-      await api.undoOperation(item.id, plan, token)
-      setMessage(`已撤回操作 #${item.id}`)
-      await onUndone()
-      await load()
-    } catch (cause) {
-      sessionStorage.removeItem('mkw-write-token')
-      setMessage(cause instanceof Error ? cause.message : '撤回失败')
-    }
-  }
-
-  return (
-    <section className="panel sync-history-panel">
-      <div className="panel-head">
-        <div>
-          <div className="panel-title">可恢复的手动操作</div>
-          <div className="panel-sub">先预览操作快照，再按图谱 revision 条件撤回；只允许安全逆序回滚。</div>
-        </div>
-      </div>
-      {items.map(item => (
-        <article className="sync-run" key={item.id}>
-          <div className="sync-run-head">
-            <strong>操作 #{item.id} · {item.action}</strong>
-            <time>{new Date(item.recordedAt).toLocaleString('zh-CN')}</time>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <Button size="small" disabled={!item.reversible} onClick={() => void undo(item)}>
-              {item.reversible ? '预览并撤回' : '图谱已变化 / 已撤回'}
-            </Button>
-          </div>
-        </article>
-      ))}
-      {!items.length && <small>暂无可撤回的手动操作。{message && ` ${message}`}</small>}
-      {items.length > 0 && message && <p className="sync-conflict">{message}</p>}
-    </section>
-  )
-}
 
 function SourcePolicyPanel() {
   const [items, setItems] = useState<SourcePolicy[]>([])

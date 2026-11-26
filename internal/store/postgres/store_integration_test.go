@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -206,8 +205,21 @@ func TestEntityHistoryTracksCreateUpdateStaleAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) != 4 || history[0].Action != "deleted" {
-		t.Fatalf("delete event missing: %+v", history)
+	// Removal is retirement, so the node records an update rather than a delete;
+	// the identity survives and the lifecycle carries the fact that it is gone.
+	if len(history) != 4 || history[0].Action != "updated" {
+		t.Fatalf("retire event missing: %+v", history)
+	}
+	after, err := store.LoadSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired, ok := after.Node("server")
+	if !ok {
+		t.Fatal("retired node was physically removed")
+	}
+	if retired.Lifecycle != "retired" {
+		t.Fatalf("expected lifecycle retired, got %q", retired.Lifecycle)
 	}
 }
 
@@ -395,54 +407,6 @@ func TestProvisionalReviewEvidenceReferencePersistsAcrossStoreReopen(t *testing.
 		t.Fatalf("review reference did not survive PostgreSQL reload: %+v", node)
 	}
 }
-
-func TestSyncUndoRejectsSourceMetadataChangedWithoutGraphDiff(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	store := openTestStore(t)
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	base := graph.New()
-	_ = base.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
-	if err := store.SaveSnapshot(ctx, base); err != nil {
-		t.Fatal(err)
-	}
-	first := graph.SourceBatch{Source: "same-source", ParserVersion: "v1"}
-	p, err := store.PreviewSync(ctx, first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = store.ApplySyncPlan(ctx, first, p.ExpectedRevision); err != nil {
-		t.Fatal(err)
-	}
-	ops, err := store.MutationOperations(ctx, 10)
-	if err != nil || len(ops) != 1 || !ops[0].Reversible {
-		t.Fatalf("first sync operation should be reversible: %+v %v", ops, err)
-	}
-	firstID := ops[0].ID
-	second := graph.SourceBatch{Source: "same-source", ParserVersion: "v2"}
-	p, err = store.PreviewSync(ctx, second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = store.ApplySyncPlan(ctx, second, p.ExpectedRevision); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = store.PreviewUndoOperation(ctx, firstID); err == nil {
-		t.Fatal("undo preview accepted outdated source metadata despite unchanged graph")
-	}
-	ops, err = store.MutationOperations(ctx, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, op := range ops {
-		if op.ID == firstID && op.Reversible {
-			t.Fatal("stale sync undo remained enabled")
-		}
-	}
-}
-
 func TestPersistentManualNodeAndRelationMaintenance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -484,160 +448,6 @@ func TestPersistentManualNodeAndRelationMaintenance(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func TestManualOperationsCanOnlyUndoInSafeReverseOrder(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	store := openTestStore(t)
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	base := graph.New()
-	_ = base.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
-	if err := store.SaveSnapshot(ctx, base); err != nil {
-		t.Fatal(err)
-	}
-	n := graph.Node{ID: "created", Type: graph.Machine, Name: "Before", ModelVersion: 1, Source: "manual:test"}
-	r := graph.Relation{ID: "onboard", From: "self", Predicate: graph.KnowsAbout, To: "created", Source: "manual:test"}
-	if err := store.CreateNode(ctx, n, r); err != nil {
-		t.Fatal(err)
-	}
-	n.Name = "After"
-	if err := store.UpdateNode(ctx, n.ID, n); err != nil {
-		t.Fatal(err)
-	}
-	ops, err := store.MutationOperations(ctx, 20)
-	if err != nil || len(ops) != 2 || !ops[0].Reversible {
-		t.Fatalf("latest op should be reversible: %+v %v", ops, err)
-	}
-	undoPlan, planErr := store.PreviewUndoOperation(ctx, ops[0].ID)
-	if planErr != nil || undoPlan.ExpectedRevision == "" {
-		t.Fatalf("undo preview failed: %+v %v", undoPlan, planErr)
-	}
-	if err = store.UndoOperationPlanned(ctx, ops[0].ID, undoPlan.ExpectedRevision); err != nil {
-		t.Fatal(err)
-	}
-	if err = store.UndoOperationPlanned(ctx, ops[0].ID, undoPlan.ExpectedRevision); err == nil {
-		t.Fatal("replayed undo plan was accepted")
-	}
-	loaded, err := store.LoadSnapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	restored, _ := loaded.Node("created")
-	if restored.Name != "Before" {
-		t.Fatalf("wrong restored state: %+v", restored)
-	}
-	ops, err = store.MutationOperations(ctx, 20)
-	if err != nil || len(ops) != 2 || ops[0].Reversible || !ops[1].Reversible {
-		t.Fatalf("undo stack should expose only unchanged predecessor: %+v %v", ops, err)
-	}
-	if err = store.UndoOperation(ctx, ops[1].ID); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err = store.LoadSnapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := loaded.Node("created"); ok {
-		t.Fatalf("creation undo did not remove node: %+v", loaded.Nodes())
-	}
-}
-
-func TestUndoSnapshotsAreBoundedAndExpiredRecordsRemainAuditOnly(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	store := openTestStore(t)
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	g := graph.New()
-	_ = g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
-	_ = g.Publish(graph.Node{ID: "m", Type: graph.Machine, Name: "0", ModelVersion: 1}, graph.Relation{ID: "knows", To: "m"})
-	if err := store.SaveSnapshot(ctx, g); err != nil {
-		t.Fatal(err)
-	}
-	node, _ := g.Node("m")
-	for i := 1; i <= 51; i++ {
-		node.Name = fmt.Sprintf("%d", i)
-		if err := store.UpdateNode(ctx, node.ID, node); err != nil {
-			t.Fatalf("update %d: %v", i, err)
-		}
-	}
-	if err := store.UndoOperation(ctx, 1); err == nil || !strings.Contains(err.Error(), "expired") {
-		t.Fatalf("old undo payload should expire, got %v", err)
-	}
-	ops, err := store.MutationOperations(ctx, 100)
-	if err != nil || len(ops) != 51 {
-		t.Fatalf("audit summaries should remain after snapshot pruning: count=%d err=%v", len(ops), err)
-	}
-}
-
-func TestSyncBatchUndoRestoresGraphSourceStateAndIdentityMappings(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	store := openTestStore(t)
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	base := graph.New()
-	_ = base.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1})
-	if err := store.SaveSnapshot(ctx, base); err != nil {
-		t.Fatal(err)
-	}
-	batch := graph.SourceBatch{Source: "inventory", ParserVersion: "v1", IdentityMappings: []graph.IdentityMapping{{SourceID: "external-1", NodeID: "server"}}, Nodes: []graph.Node{{ID: "external-1", Type: graph.Machine, Name: "Before", ModelVersion: 1}}}
-	first, err := store.ApplySync(ctx, batch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	batch.ParserVersion = "v2"
-	batch.Nodes[0].Name = "After"
-	if _, err = store.ApplySync(ctx, batch); err != nil {
-		t.Fatal(err)
-	}
-	ops, err := store.MutationOperations(ctx, 20)
-	if err != nil || len(ops) != 2 || !ops[0].Reversible {
-		t.Fatalf("sync operations missing: %+v %v", ops, err)
-	}
-	if err = store.UndoOperation(ctx, ops[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := store.LoadSnapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	n, _ := loaded.Node("server")
-	if n.Name != "Before" {
-		t.Fatalf("sync undo did not restore object: %+v", n)
-	}
-	sources, err := store.SyncSources(ctx)
-	if err != nil || len(sources) != 1 || sources[0].SourceHash != first.SourceHash || sources[0].ParserVersion != "v1" {
-		t.Fatalf("prior source state not restored: %+v %v", sources, err)
-	}
-	history, err := store.SyncHistory(ctx, "inventory", 10)
-	if err != nil || len(history) != 2 || !history[0].Undone {
-		t.Fatalf("run history should record undo: %+v %v", history, err)
-	}
-	ops, err = store.MutationOperations(ctx, 20)
-	if err != nil || !ops[1].Reversible {
-		t.Fatalf("previous batch should be undoable after latest is rolled back: %+v %v", ops, err)
-	}
-	if err = store.UndoOperation(ctx, ops[1].ID); err != nil {
-		t.Fatal(err)
-	}
-	sources, err = store.SyncSources(ctx)
-	if err != nil || len(sources) != 0 {
-		t.Fatalf("first sync should revert to no prior source state: %+v %v", sources, err)
-	}
-	restored, err := store.LoadSnapshot(ctx)
-	if err != nil {
-		t.Fatalf("first import undo should restore the Self-only graph: %v", err)
-	}
-	if len(restored.Nodes()) != 1 || restored.Nodes()[0].Type != graph.Self {
-		t.Fatalf("first import undo did not restore Self-only graph: %+v", restored.Nodes())
-	}
-}
-
 func TestManualMutationPreviewRequiresMatchingRevisionAndPayload(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -755,21 +565,6 @@ func TestApplyCreateBatchIsAtomicRecordedAndRevisionChecked(t *testing.T) {
 	if _, ok := loaded.Node("host-d"); ok {
 		t.Fatal("rejected batch modified the graph")
 	}
-	// The recorded operation must be undoable like any other write.
-	operations, err := store.MutationOperations(ctx, 5)
-	if err != nil || len(operations) == 0 || operations[0].Action != "manual:createBatch" {
-		t.Fatalf("operation not recorded: %+v %v", operations, err)
-	}
-	if err = store.UndoOperation(ctx, operations[0].ID); err != nil {
-		t.Fatalf("undo: %v", err)
-	}
-	loaded, err = store.LoadSnapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := loaded.Node("host-c"); ok {
-		t.Fatal("undo did not remove the batch nodes")
-	}
 }
 
 func TestPreviewSyncDoesNotMutateSubmittedIdentityMappings(t *testing.T) {
@@ -871,43 +666,35 @@ func TestDirectPatchAndDeleteMutations(t *testing.T) {
 		t.Fatalf("unexpected patch relation result: %+v, rev: %s", patchedRel, revAfterPatchRel)
 	}
 
-	// 5. DeleteNode host-mut while proj-mut depends on it fails with 409 referential integrity error
-	_, err = store.DeleteNodeWithRevision(ctx, "host-mut", revAfterPatchRel)
-	if err == nil {
-		t.Fatal("expected error deleting node with active relations")
-	}
-
-	// 6. DeleteRelation rel-mut succeeds
-	revAfterDelRel, err := store.DeleteRelationWithRevision(ctx, "rel-mut", revAfterPatchRel)
-	if err != nil {
-		t.Fatalf("DeleteRelationWithRevision failed: %v", err)
-	}
-
-	// 7. DeleteNode host-mut now succeeds (only self anchor remains, cleaned up together)
-	revAfterDelHost, err := store.DeleteNodeWithRevision(ctx, "host-mut", revAfterDelRel)
+	// 5. Deleting a node retires it even while relations still point at it:
+	// removal is a lifecycle change, so nothing has to be dismantled first.
+	revAfterDelHost, err := store.DeleteNodeWithRevision(ctx, "host-mut", revAfterPatchRel)
 	if err != nil {
 		t.Fatalf("DeleteNodeWithRevision host-mut failed: %v", err)
 	}
 
-	// 8. DeleteNode proj-mut succeeds
-	revAfterDelProj, err := store.DeleteNodeWithRevision(ctx, "proj-mut", revAfterDelHost)
+	// 5b. Relations are still removed physically: a relation has no lifecycle,
+	// so deleting one is unambiguous.
+	revAfterDelRel, err := store.DeleteRelationWithRevision(ctx, "rel-mut", revAfterDelHost)
 	if err != nil {
-		t.Fatalf("DeleteNodeWithRevision proj-mut failed: %v", err)
+		t.Fatalf("DeleteRelationWithRevision failed: %v", err)
 	}
+	revAfterDelHost = revAfterDelRel
 
-	// 9. Load snapshot and verify nodes and relations are removed
+	// 6. Load snapshot and verify the node survives with lifecycle retired
 	loaded, err := store.LoadSnapshot(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := loaded.Node("host-mut"); ok {
-		t.Fatal("host-mut still exists in snapshot")
+	retired, ok := loaded.Node("host-mut")
+	if !ok {
+		t.Fatal("host-mut was physically removed; deletion must be logical")
 	}
-	if _, ok := loaded.Node("proj-mut"); ok {
-		t.Fatal("proj-mut still exists in snapshot")
+	if retired.Lifecycle != "retired" {
+		t.Fatalf("expected host-mut lifecycle retired, got %q", retired.Lifecycle)
 	}
 	if _, ok := loaded.Relation("rel-mut"); ok {
-		t.Fatal("rel-mut still exists in snapshot")
+		t.Fatal("explicitly deleted relation still exists in snapshot")
 	}
 
 	// 10. Check audit history
@@ -915,8 +702,8 @@ func TestDirectPatchAndDeleteMutations(t *testing.T) {
 	if err != nil || len(history) == 0 {
 		t.Fatalf("expected entity history for host-mut: %+v %v", history, err)
 	}
-	if history[0].Action != "deleted" {
-		t.Fatalf("latest action want deleted, got %s", history[0].Action)
+	if history[0].Action != "updated" {
+		t.Fatalf("latest action want updated (retire), got %s", history[0].Action)
 	}
 
 	// 11. Test RetireNode
@@ -928,7 +715,7 @@ func TestDirectPatchAndDeleteMutations(t *testing.T) {
 			},
 		},
 	}
-	_, revBeforeRetire, err := store.ApplyCreateBatch(ctx, retireBatch, revAfterDelProj)
+	_, revBeforeRetire, err := store.ApplyCreateBatch(ctx, retireBatch, revAfterDelHost)
 	if err != nil {
 		t.Fatalf("create retire target failed: %v", err)
 	}
@@ -967,12 +754,4 @@ func TestDirectPatchAndDeleteMutations(t *testing.T) {
 		t.Fatalf("expected updated action in history, got %s", retireHist[0].Action)
 	}
 
-	// Verify reversible operation was logged
-	ops, err := store.MutationOperations(ctx, 10)
-	if err != nil || len(ops) == 0 {
-		t.Fatalf("expected mutation operations: %v", err)
-	}
-	if ops[0].Action != "manual:retireNode" {
-		t.Fatalf("expected latest operation to be manual:retireNode, got %s", ops[0].Action)
-	}
 }

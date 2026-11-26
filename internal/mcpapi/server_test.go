@@ -326,7 +326,7 @@ func TestMCPWritableToolsWhenConfigured(t *testing.T) {
 	}
 	expectedTools := []string{
 		"graph_query", "graph_entity", "graph_relations", "graph_impact", "graph_explore", "graph_history", "graph_search",
-		"graph_create_node", "graph_patch_node", "graph_retire_node", "graph_delete_node",
+		"graph_create_node", "graph_patch_node", "graph_retire_node",
 		"graph_provisional_queue", "graph_review_provisional", "graph_feedback",
 	}
 	for _, name := range expectedTools {
@@ -467,22 +467,4 @@ func TestMCPWritableToolsWhenConfigured(t *testing.T) {
 	}
 
 	// 5. graph_delete_node
-	deleteRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "graph_delete_node",
-		Arguments: map[string]any{
-			"id":               "mcp-machine",
-			"expectedRevision": "rev-after-retire",
-		},
-	})
-	if err != nil {
-		t.Fatalf("graph_delete_node failed: %v", err)
-	}
-	deleteJSON, _ := json.Marshal(deleteRes.StructuredContent)
-	var deleteOut DeleteNodeOutput
-	if err := json.Unmarshal(deleteJSON, &deleteOut); err != nil {
-		t.Fatalf("unmarshal delete output: %v", err)
-	}
-	if deleteOut.DeletedID != "mcp-machine" || deleteOut.Revision != "rev-after-delete" {
-		t.Fatalf("unexpected delete output: %+v", deleteOut)
-	}
 }

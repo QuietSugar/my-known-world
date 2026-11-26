@@ -29,13 +29,6 @@ type ManualMutationPlanner interface {
 type ManualMutationApplier interface {
 	ApplyManualMutation(context.Context, graph.ManualMutation, string, string) (graph.MutationPlan, error)
 }
-type MutationOperationReader interface {
-	MutationOperations(context.Context, int) ([]graph.MutationOperation, error)
-}
-type UndoPlanWriter interface {
-	PreviewUndoOperation(context.Context, int64) (graph.MutationPlan, error)
-	UndoOperationPlanned(context.Context, int64, string) error
-}
 type NodeCreator interface {
 	CreateNode(context.Context, graph.Node, graph.Relation) error
 }
@@ -161,15 +154,6 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		case path == "/api/operations/apply":
 			h.applyManualMutation(w, r)
-			return
-		case strings.HasPrefix(path, "/api/operations/") && strings.HasSuffix(path, "/undo/preview"):
-			h.previewUndo(w, r, path)
-			return
-		case strings.HasPrefix(path, "/api/operations/") && strings.HasSuffix(path, "/undo/apply"):
-			h.applyUndo(w, r, path)
-			return
-		case strings.HasPrefix(path, "/api/operations/") && strings.HasSuffix(path, "/undo"):
-			h.rejectUnpreviewedWrite(w, r)
 			return
 		case path == "/api/sync/apply":
 			h.apply(w, r)
@@ -388,18 +372,6 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		items, err := reader.EntityHistory(r.Context(), kind, id, 100)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "history_failed", err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items})
-	case path == "/api/operations":
-		reader, ok := h.Repository.(MutationOperationReader)
-		if !ok {
-			writeError(w, http.StatusServiceUnavailable, "operations_unavailable", "operation history requires PostgreSQL")
-			return
-		}
-		items, err := reader.MutationOperations(r.Context(), 50)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "operations_failed", err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -877,72 +849,6 @@ func (h *Handler) applyManualMutation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"applied": true, "plan": plan})
-}
-
-func operationIDFromPath(path, suffix string) (int64, error) {
-	raw := strings.TrimSuffix(strings.TrimPrefix(path, "/api/operations/"), suffix)
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id < 1 {
-		return 0, errors.New("operation ID must be a positive integer")
-	}
-	return id, nil
-}
-func (h *Handler) previewUndo(w http.ResponseWriter, r *http.Request, path string) {
-	planner, ok := h.Repository.(UndoPlanWriter)
-	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "undo_unavailable", "undo preview requires PostgreSQL")
-		return
-	}
-	id, err := operationIDFromPath(path, "/undo/preview")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_operation", err.Error())
-		return
-	}
-	plan, err := planner.PreviewUndoOperation(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusConflict, "undo_rejected", err.Error())
-		return
-	}
-	plan.PlanHash, err = guardedPlanMAC(h.WriteToken, "undo-operation", plan.ExpectedRevision, id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "plan_failed", "could not create undo plan")
-		return
-	}
-	writeJSON(w, http.StatusOK, plan)
-}
-func (h *Handler) applyUndo(w http.ResponseWriter, r *http.Request, path string) {
-	if !h.authorized(w, r) {
-		return
-	}
-	planner, ok := h.Repository.(UndoPlanWriter)
-	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "undo_unavailable", "undo apply requires PostgreSQL")
-		return
-	}
-	id, err := operationIDFromPath(path, "/undo/apply")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_operation", err.Error())
-		return
-	}
-	var body struct {
-		ExpectedRevision string `json:"expectedRevision"`
-		PlanHash         string `json:"planHash"`
-	}
-	if err = decodeBody(w, r, 16<<10, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
-	expected, err := guardedPlanMAC(h.WriteToken, "undo-operation", body.ExpectedRevision, id)
-	if err != nil || !hmac.Equal([]byte(expected), []byte(body.PlanHash)) {
-		writeError(w, http.StatusConflict, "undo_rejected", "plan does not match the previewed operation and revision")
-		return
-	}
-	if err = planner.UndoOperationPlanned(r.Context(), id, body.ExpectedRevision); err != nil {
-		writeError(w, http.StatusConflict, "undo_rejected", err.Error())
-		return
-	}
-	h.invalidateCache()
-	writeJSON(w, http.StatusOK, map[string]int64{"undone": id})
 }
 
 func (h *Handler) createNode(w http.ResponseWriter, r *http.Request) {

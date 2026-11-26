@@ -5,10 +5,26 @@ import (
 	"fmt"
 )
 
-// DeleteNode explicitly removes one node and its directly attached relations
-// and assertions. It never cascades through other nodes; if the remaining graph
-// would contain a disconnected node, the operation is rejected atomically.
+// DeleteNode retires a node instead of removing it.
+//
+// Deleting business data physically is destructive: the row, its relations and
+// its field assertions all disappear, and anything that referenced the node —
+// external notes, credentials, other systems — silently breaks. Removal is
+// therefore expressed as retirement: the node keeps its identity and relations
+// but is marked lifecycle=retired, so it stops appearing as current while the
+// history stays intact and the decision can be reversed.
+//
+// purgeNode remains available for the rare case where a row must really go
+// (test fixtures, mistaken imports). It is deliberately not reachable from the
+// API or MCP surface.
 func (g *Graph) DeleteNode(id string) (*Graph, error) {
+	return g.RetireNode(id)
+}
+
+// PurgeNode removes one node and its directly attached relations and assertions.
+// It never cascades through other nodes; if the remaining graph would contain a
+// disconnected node, the operation is rejected atomically.
+func (g *Graph) PurgeNode(id string) (*Graph, error) {
 	n, ok := g.Node(id)
 	if !ok {
 		return nil, errors.New("node not found")

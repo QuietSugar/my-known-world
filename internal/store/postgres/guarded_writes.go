@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/QuietSugar/my-known-world/internal/graph"
 )
@@ -154,15 +153,6 @@ func syncRevision(ctx context.Context, q queryer, g *graph.Graph) (string, error
 	}
 	return revisionOf(state)
 }
-
-func undoPlanRevision(id int64, graphHash, operationHash string) (string, error) {
-	return revisionOf(struct {
-		OperationID   int64  `json:"operationId"`
-		GraphHash     string `json:"graphHash"`
-		OperationHash string `json:"operationHash"`
-	}{id, graphHash, operationHash})
-}
-
 func validateSyncUndoState(ctx context.Context, tx queryer, metadata syncUndoMetadata) error {
 	if metadata.AppliedState == nil {
 		return errors.New("sync undo metadata lacks the applied source state; operation is audit-only")
@@ -190,59 +180,6 @@ func validateSyncUndoState(ctx context.Context, tx queryer, metadata syncUndoMet
 	}
 	return nil
 }
-
-func (s *Store) PreviewUndoOperation(ctx context.Context, id int64) (graph.MutationPlan, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-	if err != nil {
-		return graph.MutationPlan{}, err
-	}
-	defer tx.Rollback()
-	current, err := loadSnapshotTx(ctx, tx)
-	if errors.Is(err, ErrEmptySnapshot) {
-		current = graph.New()
-	} else if err != nil {
-		return graph.MutationPlan{}, err
-	}
-	graphHash, err := current.Fingerprint()
-	if err != nil {
-		return graph.MutationPlan{}, err
-	}
-	var afterHash, action string
-	var before, metadataJSON []byte
-	if err = tx.QueryRowContext(ctx, `SELECT before_state,after_hash,action,metadata FROM graph_mutation_operations WHERE operation_id=$1`, id).Scan(&before, &afterHash, &action, &metadataJSON); errors.Is(err, sql.ErrNoRows) {
-		return graph.MutationPlan{}, fmt.Errorf("operation %d not found", id)
-	} else if err != nil {
-		return graph.MutationPlan{}, err
-	}
-	if strings.HasPrefix(action, "sync:") {
-		var meta syncUndoMetadata
-		if err = json.Unmarshal(metadataJSON, &meta); err != nil {
-			return graph.MutationPlan{}, err
-		}
-		if err = validateSyncUndoState(ctx, tx, meta); err != nil {
-			return graph.MutationPlan{}, err
-		}
-	}
-	if string(before) == `{}` {
-		return graph.MutationPlan{}, errors.New("undo snapshot expired; operation is audit-only")
-	}
-	var undone bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM graph_operation_undos WHERE operation_id=$1)`, id).Scan(&undone); err != nil {
-		return graph.MutationPlan{}, err
-	}
-	if undone {
-		return graph.MutationPlan{}, fmt.Errorf("operation %d was already undone", id)
-	}
-	if graphHash != afterHash {
-		return graph.MutationPlan{}, errors.New("undo rejected: graph changed after this operation")
-	}
-	revision, err := undoPlanRevision(id, graphHash, afterHash)
-	if err != nil {
-		return graph.MutationPlan{}, err
-	}
-	return graph.MutationPlan{ExpectedRevision: revision}, tx.Commit()
-}
-
 func (s *Store) PreviewSourcePolicy(ctx context.Context, policy graph.SourcePolicy) (graph.MutationPlan, *graph.SourcePolicy, error) {
 	if err := policy.Validate(); err != nil {
 		return graph.MutationPlan{}, nil, err

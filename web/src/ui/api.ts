@@ -23,7 +23,6 @@ export interface FieldConflict { nodeId:string; fieldPath:string; assertionIds:s
 export interface SyncPreview { expectedRevision?:string; planHash?:string; source: string; sourceHash: string; parserVersion?: string; addedNodes: string[]; updatedNodes: string[]; addedRelations: string[]; updatedRelations: string[]; missingNodes: string[]; newlyMissingNodes: string[]; alreadyStaleNodes: string[]; missingRelations: string[]; newlyMissingRelations: string[]; alreadyStaleRelations: string[]; conflicts: string[]; addedAssertions: string[]; updatedAssertions: string[]; missingAssertions: string[]; newlyMissingAssertions: string[]; alreadyStaleAssertions: string[]; valueConflicts:FieldConflict[] }
 export interface ManualMutation { kind:'createNode'|'updateNode'|'addRelation'|'updateRelation'|'deleteRelation'|'deleteNode'|'reviewProvisional'|'rejectProvisional'; node?:Node; relation?:Relation; id?:string; targetType?:NodeType; reviewEvidence?:{certainty?:Certainty;evidenceKind?:EvidenceKind;source?:string;reference?:string} }
 export interface MutationPlan { expectedRevision:string; planHash:string; delta:{addedNodes:string[];updatedNodes:string[];deletedNodes:string[];addedRelations:string[];updatedRelations:string[];deletedRelations:string[];addedAssertions:string[];deletedAssertions:string[]} }
-export interface MutationOperation { id:number; action:string; recordedAt:string; reversible:boolean }
 export interface SourcePolicy { source:string; priority:number; allowedNodeTypes:NodeType[]; allowedPredicates:string[]; allowedFieldPaths:string[] }
 export interface SyncSource { source: string; sourceHash: string; parserVersion: string; appliedAt: string }
 export interface FieldResolution { id:number; nodeId:string; fieldPath:string; selectedAssertionIds:string[]; rationaleReference:string; recordedAt:string }
@@ -113,9 +112,6 @@ export const api = {
   syncSources: () => readJSON<{ items: SyncSource[] }>('/api/sync/sources'),
   previewMutation: (mutation:ManualMutation) => writeJSON<MutationPlan>('/api/operations/preview','',{mutation}),
   applyMutation: (mutation:ManualMutation,plan:MutationPlan,token:string) => writeJSON<{applied:boolean;plan:MutationPlan}>('/api/operations/apply',token,{mutation,expectedRevision:plan.expectedRevision,planHash:plan.planHash}),
-  mutationOperations: () => readJSON<{ items:MutationOperation[] }>('/api/operations'),
-  previewUndoOperation: (id:number) => writeJSON<MutationPlan>(`/api/operations/${id}/undo/preview`,'',{}),
-  undoOperation: (id:number,plan:MutationPlan,token:string) => writeJSON<{undone:number}>(`/api/operations/${id}/undo/apply`,token,{expectedRevision:plan.expectedRevision,planHash:plan.planHash}),
   sourcePolicies: () => readJSON<{ items: SourcePolicy[] }>('/api/sync/policies'),
   previewSourcePolicy: (policy:SourcePolicy) => writeJSON<{plan:MutationPlan;previousPolicy:SourcePolicy|null;policy:SourcePolicy}>('/api/sync/policies/preview','',{policy}),
   saveSourcePolicy: (policy:SourcePolicy,plan:MutationPlan,token:string) => writeJSON<{saved:boolean;policy:SourcePolicy}>('/api/sync/policies/apply',token,{policy,expectedRevision:plan.expectedRevision,planHash:plan.planHash}),

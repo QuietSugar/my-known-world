@@ -31,10 +31,21 @@ POSTGRES_TEST_DSN="postgres://<user>:<pw>@127.0.0.1:<port>/mkw_integration_test?
 仅保留 `cmdb_local_secrets.uuid`（密码条目身份）与 `graph_change_history.entity_uuid`
 （审计快照）。数据库不再自动生成标识，由写入方提供。
 
-已知的既有失败（与身份改动无关）：`TestApplyCreateBatchIsAtomicRecordedAndRevisionChecked`、
-`TestDirectPatchAndDeleteMutations`、`TestManualOperationsCanOnlyUndoInSafeReverseOrder`、
-`TestSyncBatchUndoRestoresGraphSourceStateAndIdentityMappings` 共 4 项，都是撤销/乐观锁
-语义问题。
+集成测试目前全部通过。历史上长期失败的撤销与乐观锁四项已解决——根因是快照
+读写指纹不一致（读路径多填 uuid 字段、写路径未做微秒时间规范化），撤销因此恒
+不可用。撤销功能随后按设计下线，见下节。
+
+## 一·五、撤销已下线，改用备份 + 逻辑删除
+
+撤销原先的实现是「每次写存两份整图快照」，131 节点时单份 84–397 KB，历史表
+已占 5.9 MB，且一次改 IP 就要重写整张图。所以移除：
+
+- 数据库不再存操作快照，`graph_mutation_operations` 只留 `action`/`recorded_at` 作审计
+- API 与前端不再提供撤销入口
+- **危险操作前跑 `scripts/backup-db.sh <标签>`**，它会在成功后校验表数量，坏备份直接报错
+- 业务删除改为逻辑删除：`DeleteNode` 现在设 `lifecycle=retired`，节点与关系保留，
+  身份不变。物理清除仍是 `PurgeNode`，但不经 API/MCP 暴露
+- MCP 只留 `graph_retire_node`，`graph_delete_node` 已合并进去
 
 ## 二、数据完整性（线上库）
 

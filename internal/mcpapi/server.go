@@ -111,12 +111,8 @@ func NewServerWithUsageLog(implVersion string, load GraphLoader, history History
 		}, s.patchNode)
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "graph_retire_node",
-			Description: "Retire (soft decommission) an active entity by setting its lifecycle to 'retired' and stamping lastConfirmed time. Preserves the node and its relations in the graph without breaking connectivity. Prefer retirement over physical deletion for decommissioned hardware, machines, or services. Self cannot be retired. Returns retired node and new revision.",
+			Description: "Remove an entity logically: sets its lifecycle to 'retired' and stamps lastConfirmed, keeping the node, its identity and its relations so history and external references stay intact. This is the only removal operation — nothing is deleted physically, and relations may still point at the retired node. Self cannot be retired. Returns retired node and new revision.",
 		}, s.retireNode)
-		mcp.AddTool(srv, &mcp.Tool{
-			Name:        "graph_delete_node",
-			Description: "Physically remove a node and its attached assertions from the graph under optimistic concurrency control. Requires expectedRevision. Self cannot be deleted. Fails if active non-Self relations exist (remove them first) or if deletion would disconnect other nodes. Use graph_retire_node instead when an entity is decommissioned. Returns deleted id and new revision.",
-		}, s.deleteNode)
 	}
 
 	return srv, nil
@@ -808,32 +804,4 @@ func (s *Server) retireNode(ctx context.Context, _ *mcp.CallToolRequest, in Reti
 		return nil, RetireNodeOutput{}, err
 	}
 	return nil, RetireNodeOutput{Node: retired, Revision: rev}, nil
-}
-
-type DeleteNodeInput struct {
-	ID               string `json:"id"`
-	ExpectedRevision string `json:"expectedRevision"`
-}
-
-type DeleteNodeOutput struct {
-	ID        string `json:"id"`
-	DeletedID string `json:"deletedId"`
-	Revision  string `json:"revision"`
-}
-
-func (s *Server) deleteNode(ctx context.Context, _ *mcp.CallToolRequest, in DeleteNodeInput) (*mcp.CallToolResult, DeleteNodeOutput, error) {
-	if s.writer == nil {
-		return nil, DeleteNodeOutput{}, errors.New("write operations are not enabled")
-	}
-	if strings.TrimSpace(in.ID) == "" {
-		return nil, DeleteNodeOutput{}, errors.New("id is required")
-	}
-	if strings.TrimSpace(in.ExpectedRevision) == "" {
-		return nil, DeleteNodeOutput{}, errors.New("expectedRevision is required")
-	}
-	rev, err := s.writer.DeleteNodeWithRevision(ctx, in.ID, in.ExpectedRevision)
-	if err != nil {
-		return nil, DeleteNodeOutput{}, err
-	}
-	return nil, DeleteNodeOutput{ID: in.ID, DeletedID: in.ID, Revision: rev}, nil
 }

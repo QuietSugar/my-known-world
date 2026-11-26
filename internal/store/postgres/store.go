@@ -19,7 +19,7 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 var ErrEmptySnapshot = errors.New("database contains no graph snapshot")
 
@@ -69,7 +69,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	// 24-step incremental chain is gone: it only ever needed to run on the
 	// development and svc databases, both of which are already at the final
 	// shape, and keeping one-way steps around made every start replay them.
-	files := []string{"migrations/001_schema.sql"}
+	files := []string{"migrations/001_schema.sql", "migrations/002_drop_undo_snapshots.sql"}
 	if len(files) != schemaVersion {
 		return fmt.Errorf("migration list has %d entries, schemaVersion is %d", len(files), schemaVersion)
 	}
@@ -513,21 +513,12 @@ func (s *Store) applySync(ctx context.Context, batch graph.SourceBatch, expected
 	if err = appendGraphDiff(ctx, tx, &runID, preview.Source, current, updated); err != nil {
 		return &preview, err
 	}
-	beforeState, _ := json.Marshal(current.Snapshot())
-	afterState, _ := json.Marshal(updated.Snapshot())
-	afterHash, err := updated.Fingerprint()
-	if err != nil {
-		return &preview, err
-	}
 	metadata, err := json.Marshal(syncUndo)
 	if err != nil {
 		return &preview, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action,before_state,after_state,after_hash,metadata,run_id) VALUES($1,$2,$3,$4,$5,$6)`, "sync:"+batch.Source, beforeState, afterState, afterHash, metadata, runID); err != nil {
-		return &preview, fmt.Errorf("record reversible sync operation: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE graph_mutation_operations SET before_state='{}'::jsonb,after_state='{}'::jsonb WHERE operation_id NOT IN (SELECT operation_id FROM graph_mutation_operations ORDER BY recorded_at DESC,operation_id DESC LIMIT 50)`); err != nil {
-		return &preview, err
+	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action,metadata,run_id) VALUES($1,$2,$3)`, "sync:"+batch.Source, metadata, runID); err != nil {
+		return &preview, fmt.Errorf("record sync operation: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
 		return &preview, err
@@ -755,16 +746,7 @@ func (s *Store) ApplyManualMutation(ctx context.Context, mutation graph.ManualMu
 	if err = appendGraphDiff(ctx, tx, nil, action, current, updated); err != nil {
 		return graph.MutationPlan{}, err
 	}
-	before, _ := json.Marshal(current.Snapshot())
-	after, _ := json.Marshal(updated.Snapshot())
-	afterHash, err := updated.Fingerprint()
-	if err != nil {
-		return graph.MutationPlan{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action,before_state,after_state,after_hash) VALUES($1,$2,$3,$4)`, action, before, after, afterHash); err != nil {
-		return graph.MutationPlan{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE graph_mutation_operations SET before_state='{}'::jsonb,after_state='{}'::jsonb WHERE operation_id NOT IN (SELECT operation_id FROM graph_mutation_operations ORDER BY recorded_at DESC,operation_id DESC LIMIT 50)`); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action) VALUES($1)`, action); err != nil {
 		return graph.MutationPlan{}, err
 	}
 	plan := graph.MutationPlan{ExpectedRevision: revision, PlanHash: planHash, Delta: graph.DiffGraphs(current, updated)}
@@ -815,22 +797,17 @@ func (s *Store) ApplyCreateBatch(ctx context.Context, batch graph.CreateBatch, e
 	if err = appendGraphDiff(ctx, tx, nil, "manual:create", current, updated); err != nil {
 		return graph.CreateResult{}, "", err
 	}
-	before, _ := json.Marshal(current.Snapshot())
-	after, _ := json.Marshal(updated.Snapshot())
-	afterHash, err := updated.Fingerprint()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action) VALUES($1)`, "manual:createBatch"); err != nil {
+		return graph.CreateResult{}, "", fmt.Errorf("record operation: %w", err)
+	}
+	newRevision, err := updated.Fingerprint()
 	if err != nil {
 		return graph.CreateResult{}, "", err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action,before_state,after_state,after_hash) VALUES($1,$2,$3,$4)`, "manual:createBatch", before, after, afterHash); err != nil {
-		return graph.CreateResult{}, "", fmt.Errorf("record reversible operation: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE graph_mutation_operations SET before_state='{}'::jsonb,after_state='{}'::jsonb WHERE operation_id NOT IN (SELECT operation_id FROM graph_mutation_operations ORDER BY recorded_at DESC,operation_id DESC LIMIT 50)`); err != nil {
-		return graph.CreateResult{}, "", fmt.Errorf("prune old undo snapshots: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
 		return graph.CreateResult{}, "", err
 	}
-	return result, afterHash, nil
+	return result, newRevision, nil
 }
 
 func (s *Store) UpdateNode(ctx context.Context, id string, node graph.Node) error {
@@ -844,7 +821,7 @@ func (s *Store) DeleteRelation(ctx context.Context, id string) error {
 }
 
 func (s *Store) DeleteNode(ctx context.Context, id string) error {
-	return s.mutateGraph(ctx, "system:delete", func(g *graph.Graph) (*graph.Graph, error) { return g.DeleteNode(id) })
+	return s.mutateGraph(ctx, "system:retire", func(g *graph.Graph) (*graph.Graph, error) { return g.DeleteNode(id) })
 }
 
 // RejectProvisional atomically closes a candidate review without deleting it.
@@ -879,17 +856,8 @@ func (s *Store) mutateGraph(ctx context.Context, source string, mutate func(*gra
 	if err = appendGraphDiff(ctx, tx, nil, source, current, updated); err != nil {
 		return err
 	}
-	beforeJSON, _ := json.Marshal(current.Snapshot())
-	afterJSON, _ := json.Marshal(updated.Snapshot())
-	afterHash, hashErr := updated.Fingerprint()
-	if hashErr != nil {
-		return hashErr
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action,before_state,after_state,after_hash) VALUES($1,$2,$3,$4)`, source, beforeJSON, afterJSON, afterHash); err != nil {
-		return fmt.Errorf("record reversible operation: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE graph_mutation_operations SET before_state='{}'::jsonb,after_state='{}'::jsonb WHERE operation_id NOT IN (SELECT operation_id FROM graph_mutation_operations ORDER BY recorded_at DESC,operation_id DESC LIMIT 50)`); err != nil {
-		return fmt.Errorf("prune old undo snapshots: %w", err)
+	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action) VALUES($1)`, source); err != nil {
+		return fmt.Errorf("record operation: %w", err)
 	}
 	return tx.Commit()
 }
@@ -935,22 +903,17 @@ func (s *Store) mutateWithOptimisticRevision(
 	if err = appendGraphDiff(ctx, tx, nil, source, current, updated); err != nil {
 		return nil, "", err
 	}
-	beforeJSON, _ := json.Marshal(current.Snapshot())
-	afterJSON, _ := json.Marshal(updated.Snapshot())
-	afterHash, hashErr := updated.Fingerprint()
-	if hashErr != nil {
-		return nil, "", hashErr
+	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action) VALUES($1)`, source); err != nil {
+		return nil, "", fmt.Errorf("record operation: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_mutation_operations(action,before_state,after_state,after_hash) VALUES($1,$2,$3,$4)`, source, beforeJSON, afterJSON, afterHash); err != nil {
-		return nil, "", fmt.Errorf("record reversible operation: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE graph_mutation_operations SET before_state='{}'::jsonb,after_state='{}'::jsonb WHERE operation_id NOT IN (SELECT operation_id FROM graph_mutation_operations ORDER BY recorded_at DESC,operation_id DESC LIMIT 50)`); err != nil {
-		return nil, "", fmt.Errorf("prune old undo snapshots: %w", err)
+	newRevision, err := updated.Fingerprint()
+	if err != nil {
+		return nil, "", err
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, "", err
 	}
-	return result, afterHash, nil
+	return result, newRevision, nil
 }
 
 func (s *Store) PatchNode(ctx context.Context, id string, patch graph.Node, expectedRevision string) (graph.Node, string, error) {
@@ -1056,26 +1019,10 @@ func (s *Store) DeleteNodeWithRevision(ctx context.Context, id string, expectedR
 	if expectedRevision == "" {
 		return "", errors.New("expectedRevision is required")
 	}
-	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:deleteNode", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
-		old, ok := current.Node(id)
-		if !ok {
-			return nil, nil, fmt.Errorf("node %q not found", id)
-		}
-		if old.Type == graph.Self {
-			return nil, nil, errors.New("Self cannot be patched")
-		}
-		if old.Type == graph.Self {
-			return nil, nil, errors.New("Self cannot be deleted")
-		}
-		for _, r := range current.Relations() {
-			if r.From == id || r.To == id {
-				fromNode, _ := current.Node(r.From)
-				if fromNode.Type == graph.Self && r.To == id {
-					continue
-				}
-				return nil, nil, fmt.Errorf("node %q has active relations (%s); remove relations first", id, r.ID)
-			}
-		}
+	// Removal is retirement: the node and its relations stay, only the lifecycle
+	// changes. Nothing else has to be dismantled first, and the call is
+	// reversible by patching the lifecycle back.
+	_, rev, err := s.mutateWithOptimisticRevision(ctx, "manual:retireNode", expectedRevision, func(current *graph.Graph) (*graph.Graph, any, error) {
 		next, err := current.DeleteNode(id)
 		if err != nil {
 			return nil, nil, err
@@ -1213,169 +1160,6 @@ func recordEntityDiff[T any](ctx context.Context, tx *sql.Tx, runID *int64, kind
 	}
 	return nil
 }
-
-func (s *Store) MutationOperations(ctx context.Context, limit int) ([]graph.MutationOperation, error) {
-	if limit < 1 || limit > 100 {
-		limit = 50
-	}
-	current, err := s.LoadSnapshot(ctx)
-	if errors.Is(err, ErrEmptySnapshot) {
-		current = graph.New()
-	} else if err != nil {
-		return nil, err
-	}
-	hash, err := current.Fingerprint()
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT o.operation_id,o.action,o.recorded_at,o.after_hash,(u.undo_id IS NOT NULL),(o.before_state <> '{}'::jsonb),o.metadata FROM graph_mutation_operations o LEFT JOIN graph_operation_undos u ON u.operation_id=o.operation_id ORDER BY o.recorded_at DESC,o.operation_id DESC LIMIT $1`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []graph.MutationOperation{}
-	for rows.Next() {
-		var item graph.MutationOperation
-		var afterHash string
-		var metadataJSON []byte
-		var undone, snapshotAvailable bool
-		if err = rows.Scan(&item.ID, &item.Action, &item.RecordedAt, &afterHash, &undone, &snapshotAvailable, &metadataJSON); err != nil {
-			return nil, err
-		}
-		item.Reversible = !undone && snapshotAvailable && afterHash == hash
-		if item.Reversible && strings.HasPrefix(item.Action, "sync:") {
-			var meta syncUndoMetadata
-			if err = json.Unmarshal(metadataJSON, &meta); err != nil || validateSyncUndoState(ctx, s.db, meta) != nil {
-				item.Reversible = false
-			}
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) UndoOperation(ctx context.Context, id int64) error {
-	return s.undoOperation(ctx, id, "")
-}
-
-func (s *Store) UndoOperationPlanned(ctx context.Context, id int64, expectedRevision string) error {
-	if expectedRevision == "" {
-		return errors.New("expected revision is required")
-	}
-	return s.undoOperation(ctx, id, expectedRevision)
-}
-
-func (s *Store) undoOperation(ctx context.Context, id int64, expectedRevision string) error {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `LOCK TABLE nodes,relations IN ACCESS EXCLUSIVE MODE`); err != nil {
-		return err
-	}
-	var beforeJSON, metadataJSON []byte
-	var expected, action string
-	err = tx.QueryRowContext(ctx, `SELECT before_state,after_hash,action,metadata FROM graph_mutation_operations WHERE operation_id=$1`, id).Scan(&beforeJSON, &expected, &action, &metadataJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("operation %d not found", id)
-	}
-	if err != nil {
-		return err
-	}
-	if string(beforeJSON) == `{}` {
-		return errors.New("undo snapshot expired; the operation is audit-only")
-	}
-	var already bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM graph_operation_undos WHERE operation_id=$1)`, id).Scan(&already); err != nil {
-		return err
-	}
-	if already {
-		return fmt.Errorf("operation %d was already undone", id)
-	}
-	current, err := loadSnapshotTx(ctx, tx)
-	if errors.Is(err, ErrEmptySnapshot) {
-		current = graph.New()
-	} else if err != nil {
-		return err
-	}
-	currentHash, err := current.Fingerprint()
-	if err != nil {
-		return err
-	}
-	if currentHash != expected {
-		return errors.New("undo rejected: graph changed after this operation; only the latest unchanged operation can be undone")
-	}
-	if expectedRevision != "" {
-		revision, revErr := undoPlanRevision(id, currentHash, expected)
-		if revErr != nil {
-			return revErr
-		}
-		if revision != expectedRevision {
-			return errors.New("undo plan is stale; preview again before applying")
-		}
-	}
-	if strings.HasPrefix(action, "sync:") {
-		var meta syncUndoMetadata
-		if err = json.Unmarshal(metadataJSON, &meta); err != nil {
-			return err
-		}
-		if err = validateSyncUndoState(ctx, tx, meta); err != nil {
-			return err
-		}
-	}
-	var snapshot graph.Snapshot
-	if err = json.Unmarshal(beforeJSON, &snapshot); err != nil {
-		return err
-	}
-	previous, err := graph.RestoreSnapshot(snapshot)
-	if err != nil {
-		return fmt.Errorf("stored undo snapshot invalid: %w", err)
-	}
-	if len(previous.Nodes()) > 0 {
-		if err = validateSnapshot(previous); err != nil {
-			return err
-		}
-	}
-	if err = saveSnapshotTx(ctx, tx, previous); err != nil {
-		return err
-	}
-	if err = appendGraphDiff(ctx, tx, nil, "system:undo", current, previous); err != nil {
-		return err
-	}
-	beforeHash, err := previous.Fingerprint()
-	if err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_operation_undos(operation_id,before_hash) VALUES($1,$2)`, id, beforeHash); err != nil {
-		return err
-	}
-	if strings.HasPrefix(action, "sync:") {
-		var meta syncUndoMetadata
-		if err = json.Unmarshal(metadataJSON, &meta); err != nil {
-			return err
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM sync_sources WHERE source=$1`, meta.Source); err != nil {
-			return err
-		}
-		if meta.PreviousState != nil {
-			p := meta.PreviousState
-			if _, err = tx.ExecContext(ctx, `INSERT INTO sync_sources(source,source_hash,parser_version,applied_at) VALUES($1,$2,$3,$4)`, p.Source, p.SourceHash, p.ParserVersion, p.AppliedAt); err != nil {
-				return err
-			}
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM sync_identity_mappings WHERE source=$1`, meta.Source); err != nil {
-			return err
-		}
-		for _, mapping := range meta.PreviousMappings {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO sync_identity_mappings(source,source_id,node_id) VALUES($1,$2,$3)`, meta.Source, mapping.SourceID, mapping.NodeID); err != nil {
-				return err
-			}
-		}
-	}
-	return tx.Commit()
-}
-
 func (s *Store) EntityHistory(ctx context.Context, kind, id string, limit int) ([]graph.ChangeEvent, error) {
 	switch kind {
 	case "node", "relation", "assertion":
