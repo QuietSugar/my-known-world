@@ -106,6 +106,7 @@ export function getStoredToken(): string {
 
 export const api = {
   nodes: () => readJSON<PagedResult<Node>>('/api/nodes'),
+  node: (id: string) => readJSON<Node>(`/api/nodes/${encodeURIComponent(id)}`),
   relations: () => readJSON<PagedResult<Relation>>('/api/relations'),
   assertions: (id: string) => readJSON<{ items: FieldAssertionView[] }>(`/api/nodes/${encodeURIComponent(id)}/assertions`),
   provisionals: () => readJSON<{ items: Node[] }>('/api/provisionals'),
