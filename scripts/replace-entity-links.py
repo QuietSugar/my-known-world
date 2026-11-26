@@ -40,8 +40,15 @@ def load_mapping(config_path, wiki_root):
 
 
 def is_index_file(rel_path):
-    """README 是导航索引，保留链接原样。"""
-    return os.path.basename(rel_path).lower() == "readme.md"
+    """导航索引文件，保留链接原样。
+
+    注意：实体目录也常用 README.md 作为档案（如 svc/gitea/README.md），
+    那些是有 frontmatter 的实体文件，必须参与改写。真正的索引是仓库根与
+    分类目录下的 README。
+    """
+    if os.path.basename(rel_path).lower() != "readme.md":
+        return False
+    return rel_path.count(os.sep) <= 1
 
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)#\s]+\.md)(#[^)]*)?\)")

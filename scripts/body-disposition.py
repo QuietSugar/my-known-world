@@ -57,15 +57,31 @@ def read(path):
     return fm, m.group(2)
 
 
-def dedupe_candidates(fm, body):
-    """找出正文里重复了 frontmatter 值的地方。"""
+def dedupe_candidates(fm, body, declared=False):
+    """找出正文里重复了 frontmatter 值的地方。
+
+    路径出现在命令（ssh ... -f /path）、标题（# vm247 192.168.31.247）或代码块里
+    时不算重复——那是操作步骤的一部分，不是罗列事实。只有「作为事实陈述出现」
+    才算，因此先剔除代码块与行内命令。
+    """
+    # 去掉代码围栏内容
+    stripped = re.sub(r"```.*?```", "", body, flags=re.S)
+    # 去掉行内代码与命令行上下文
+    prose = re.sub(r"`[^`]*`", "", stripped)
+    prose = re.sub(r"^\s*ssh .*$", "", prose, flags=re.M)
+    # 标题保留 IP 便于阅读（如「# vm247 192.168.31.247」），不算重复
+    prose = re.sub(r"^\s*#+ .*$", "", prose, flags=re.M)
     hits = []
     for key, value in fm.items():
         if key in ("type", "id", "name", "title") or not isinstance(value, str):
             continue
         if len(value) < 6:
             continue
-        if value in body:
+        # 已经被「以 my-known-world 为准」取代的文件，正文里的零散提及属于
+        # 行文需要（如「PVE 上的 Ubuntu 服务器」），不再算重复。
+        if declared and not re.search(r"^\s*[-|]\s*" + re.escape(value), prose, re.M):
+            continue
+        if value in prose:
             hits.append(key)
     return hits
 
@@ -76,8 +92,8 @@ def main():
     for rel, uid in pairs:
         fm, body = read(os.path.join(WIKI, rel))
         tags = [name for name, pat in NARRATIVE_PATTERNS.items() if re.search(pat, body)]
-        dup = dedupe_candidates(fm, body)
-        declared = "以 my-known-world 为准" in body
+        declared = re.search(r"my-known-world\s*为准", body) is not None
+        dup = dedupe_candidates(fm, body, declared)
         if declared:
             verdict = "已声明以库为准"
         elif dup:
