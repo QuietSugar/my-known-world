@@ -193,6 +193,17 @@ ssh svc "docker exec -i hall-pgsql pg_restore --list" < <dump> | grep -c "TABLE 
 5. **口径不一**。`verify-migration` 和 `parity-report` 对「已入库」的判定方式不同：
    前者做字符串包含，后者做逐值相等。同一个事实可能一个说通过、一个说不通过。
 
+### 各脚本的方法边界（重要，不要过度解读结果）
+
+- **`parity-report.py` 只读 frontmatter**。正文提到、但 frontmatter 没写的字段，
+  它查不出来。所以「零缺口」证明的是「frontmatter 已入库」，**不能推出
+  「正文剥离无损」**。2026-11-26 漏掉的 3 处内容（gitea 备份路径、
+  tokentracker CLI 路径、hall-ops 部署联动表）都是这么漏的。
+- **`verify-migration.py compare` 基于文本基线**。它会把「UUID 化」「跨档案搬迁」
+  和「真实丢失」混在一起输出，必须逐条判断落点，不能只看条数。
+- **`check-docs.py` 对 UUID 链接只做格式校验**。打错一个字符它查不出来；
+  UUID 是否真实存在于图谱，要另用 `graph_entity` 核验。
+
 ### 结论（2026-11-26 决定：暂不实施）
 
 评估后认为这两项的投入产出不划算，暂不做：

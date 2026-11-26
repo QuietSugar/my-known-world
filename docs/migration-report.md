@@ -1,6 +1,10 @@
 # 搬迁完成报告
 
 > 2026-11-26。权威数据源是 my-known-world；hub 是投影层。
+>
+> **本文是当时验收的快照，不是活文档。** 后续又补入了字段（如 `document.notes`、
+> `mihomo` 的部署路径与端口等），事实总数已从 370 增至 376。要取当前值请直接跑
+> 「四、可复核方式」里的命令，不要引用本文的数字。
 
 ## 一、结构化事实：逐值校验通过
 
@@ -105,7 +109,17 @@
 
 ## 四、可复核方式
 
+以下命令在 my-known-world 仓库根目录执行（`scripts/` 在该仓库，hub 内没有）：
+`cd ~/git-repo/github.com/QuietSugar/my-known-world`
+
 ```bash
 python3 scripts/parity-report.py --strict    # 有缺口返回非零
 python3 scripts/body-disposition.py           # 逐文件正文去向
+python3 scripts/verify-migration.py compare   # 消失事实是否在库中可查
+```
+
+hub 内部的链接与结构检查则在 hall-wiki 目录执行：
+
+```bash
+cd <hub>/hall-wiki && python3 tooling/check-docs.py --all
 ```
