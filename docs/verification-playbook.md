@@ -22,13 +22,19 @@ POSTGRES_TEST_DSN="postgres://<user>:<pw>@127.0.0.1:<port>/mkw_integration_test?
 
 | 测试 | 守住的契约 |
 |---|---|
-| `TestUUIDsSurviveSnapshotRewrite` | 快照保存是 DELETE + INSERT，UUID 必须不变 |
-| `TestUUIDsAreDistinctAndPersisted` | 每个实体有 UUID 且不重复；关系无悬空端点 |
-| `TestLoadedNodesCarryUUID` | 读取路径必须把 UUID 带出来 |
+| `TestIdentitySurvivesSnapshotRewrite` | 快照保存是 DELETE + INSERT，身份必须不变 |
+| `TestUUIDColumnIsGone` | 冗余 uuid 列与注册表不得复活（身份只在 id 一列） |
+| `TestLoadedNodesCarryUUID` | 读取路径必须把标识带出来 |
 
-已知的既有失败（与 UUID 改动无关，2026-11-26 用改动前代码复现确认）：
-`TestApplyCreateBatchIsAtomicRecordedAndRevisionChecked`、`TestDirectPatchAndDeleteMutations`、
-`TestMigrationRepeatKeepsMarkdownRelationPredicates` 等 6 项。
+身份模型（2026-11-26 起）：`nodes.id` / `relations.id` / `field_assertions.id` 是唯一
+标识，曾经并存的 `uuid` 列及其 `node_uuid` / `from_uuid` / `to_uuid` 副本列已全部删除。
+仅保留 `cmdb_local_secrets.uuid`（密码条目身份）与 `graph_change_history.entity_uuid`
+（审计快照）。数据库不再自动生成标识，由写入方提供。
+
+已知的既有失败（与身份改动无关）：`TestApplyCreateBatchIsAtomicRecordedAndRevisionChecked`、
+`TestDirectPatchAndDeleteMutations`、`TestManualOperationsCanOnlyUndoInSafeReverseOrder`、
+`TestSyncBatchUndoRestoresGraphSourceStateAndIdentityMappings` 共 4 项，都是撤销/乐观锁
+语义问题。
 
 ## 二、数据完整性（线上库）
 
@@ -39,7 +45,6 @@ UNION ALL SELECT 'relations', count(*) FROM relations
 UNION ALL SELECT 'assertions', count(*) FROM field_assertions
 UNION ALL SELECT 'secrets', count(*) FROM cmdb_local_secrets
 UNION ALL SELECT 'uuid_form_ids', count(*) FROM nodes WHERE id ~ '^[0-9a-f]{8}-'
-UNION ALL SELECT 'id_eq_uuid', count(*) FROM nodes WHERE id = uuid::text
 UNION ALL SELECT 'dangling_rel', count(*) FROM relations r
   WHERE NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=r.from_id)
      OR NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=r.to_id)
@@ -50,7 +55,7 @@ UNION ALL SELECT 'dup_rel', count(*) FROM (
 \"" 
 ```
 
-期望：数量与改动前一致；`uuid_form_ids = nodes`；`id_eq_uuid = nodes`；
+期望：数量与改动前一致；`uuid_form_ids = nodes`（全部为 UUID 形态）；
 三个 dangling/dup 计数均为 0。
 
 ## 三、UUID 稳定性（人工，改动注册表后必做）
@@ -100,23 +105,34 @@ grep -rhoE '\`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\`' \
 
 ## 六、迁移安全性（改 migration 后必做）
 
-两个硬性要求：
+现在只有**一个**结构迁移文件 `migrations/001_schema.sql`，它一次建成完整结构。
+2026-11-26 之前的 24 步增量迁移链已删除——只有开发环境和 svc 在用，两者都已是
+最终结构，保留历史步骤反而出过故障：`Migrate` 曾无条件重放全部文件，而 021 会
+`UPDATE nodes SET id = uuid::text`，uuid 列删除后这句直接报错，容器进入重启循环。
+
+三个硬性要求：
 
 1. **migration 不得自带 `BEGIN`/`COMMIT`**——`Migrate` 已在外层开启事务，
    内层事务会报 `pq: unexpected transaction status idle` 并导致 502。
-2. **migration 必须幂等**——每次启动都会重放全部 migration。
+2. **不要写死 `public.` 前缀**——集成测试用独立 schema（`search_path`）隔离，
+   写死公共 schema 会让所有测试抢同一套表。
+3. **`schema_migrations` 由 `Migrate` 自己建**，不要放进结构文件——版本要先能读，
+   才能判断该不该建表，否则新库第一次启动就卡在鸡生蛋问题上。
 
-验证方式：在 `pg_restore` 出的独立副本上连续执行两次，比对节点 ID 指纹。
+`Migrate` 依据 `schema_migrations` 跳过已应用版本，所以**改已发布的 001 不会重跑**。
+结构需要变更时，加 `002_xxx.sql` 并把 `schemaVersion` 改成 2。
+
+验证方式：在 `pg_restore` 出的独立副本上跑一次空库迁移，比对节点数与结构。
 
 ```bash
+# 空库全新建结构
 ssh svc "docker exec hall-pgsql psql -U postgres -d postgres -c 'CREATE DATABASE mkw_check OWNER myknownworld'"
-ssh svc "docker exec -i hall-pgsql pg_restore -U postgres -d mkw_check --no-owner" < <dump>
-ssh svc "docker exec -i hall-pgsql psql -U postgres -d mkw_check -v ON_ERROR_STOP=1" < <migration.sql>
-# 执行两次，比对 SELECT md5(string_agg(id,',' ORDER BY id)) FROM nodes
+# 用 cmd 里的迁移入口或直接启动应用，随后核对
+ssh svc "docker exec -i hall-pgsql psql -U myknownworld -d mkw_check -tAc \
+  \"SELECT count(*) FROM pg_tables WHERE schemaname='public'\"   # 期望 25
+ssh svc "docker exec -i hall-pgsql psql -U myknownworld -d mkw_check -tAc \
+  \"SELECT sum(version) FROM schema_migrations\"               # 期望 1
 ```
-
-migration 若引用某张表，必须能自己建表——`cmdb_local_secrets` 由应用运行时创建，
-不在 migration 链里，020 已补上 `CREATE TABLE IF NOT EXISTS`。
 
 ## 七、备份
 
