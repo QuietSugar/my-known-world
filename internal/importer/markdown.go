@@ -227,6 +227,8 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 	// mappedByCanonical indexes by the ID actually written to the graph, which
 	// differs from the file path when identityMappings remap a source.
 	mappedByCanonical := map[string]graph.Node{}
+	// nodesByID lets body links that point at a UUID resolve without a file path.
+	nodesByID := map[string]graph.Node{}
 	for _, f := range files {
 		if _, hasDomain := f.data["domain"]; hasDomain {
 			if _, hasDomains := f.data["domains"]; hasDomains {
@@ -261,7 +263,10 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 		} else {
 			node.Type = target
 			if target == graph.Hardware {
-				node.Hardware = &graph.HardwareDetails{Category: firstString(f.data, "category"), Model: firstString(f.data, "model"), Location: firstString(f.data, "location"), Status: firstString(f.data, "status")}
+				node.Hardware = &graph.HardwareDetails{Category: firstString(f.data, "category"), Model: firstString(f.data, "model"), Location: firstString(f.data, "location"), Status: firstString(f.data, "status"), MACs: stringList(f.data["mac"])}
+				if specs := stringMap(f.data["specifications"]); len(specs) > 0 {
+					node.Hardware.Specifications = specs
+				}
 			}
 			if target == graph.Machine {
 				configuredKind := kindMap[strings.ToLower(strings.TrimSpace(typeValue))]
@@ -316,6 +321,7 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			}
 			mapped[f.rel] = node
 			mappedByCanonical[canonicalSourceID(f.rel, cfg.IdentityMappings)] = node
+			nodesByID[node.ID] = node
 		}
 		report.Batch.Nodes = append(report.Batch.Nodes, node)
 	}
@@ -517,6 +523,22 @@ func MarkdownFrontmatter(root string, cfg MarkdownConfig) (MarkdownReport, error
 			continue
 		}
 		for _, link := range f.links {
+			// A link target may be a node UUID rather than a wiki path. The hub
+			// is a projection of the authoritative graph, so referring to an
+			// entity by its UUID is the preferred form; resolve it directly.
+			if target, ok := nodesByID[link.target]; ok {
+				if node.ID == target.ID {
+					report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "self-referential Markdown link was ignored", Line: link.line})
+					continue
+				}
+				rid := relationID(node.ID, graph.RelatedTo, target.ID)
+				if relationSeen[rid] {
+					continue
+				}
+				relationSeen[rid] = true
+				report.Batch.Relations = append(report.Batch.Relations, graph.Relation{ID: rid, From: node.ID, Predicate: graph.RelatedTo, To: target.ID, Source: cfg.Source, EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed})
+				continue
+			}
 			targetPath, valid := safeReference(f.rel, link.target, filePaths)
 			if !valid || !filePaths[targetPath] {
 				report.Exclusions = append(report.Exclusions, MarkdownExclusion{SourcePath: f.rel, Reason: "relative Markdown link target is invalid or missing", Line: link.line})
@@ -774,7 +796,7 @@ func frontmatterFieldPresent(value any) bool {
 }
 
 func invalidMarkdownFieldReason(m map[string]any) string {
-	stringFields := []string{"type", "id", "name", "title", "status", "hostname", "os", "location", "category", "model", "scope", "trigger", "deploy_path", "deployment_path", "purpose", "form", "remote_repository", "repository", "upstream", "maintenance_state", "recommended_version", "successor_id", "common_configuration_reference", "runbook_reference", "role", "authoritative_reference", "superseded_by", "steps_reference", "stop_condition_reference", "rollback_reference", "verification_method", "executable_status", "kind", "rationale_reference", "decision_evidence_reference", "gateway_reference", "vpn_reference", "account", "credential_type", "access_reference"}
+	stringFields := []string{"type", "id", "name", "title", "status", "hostname", "os", "location", "category", "model", "scope", "trigger", "deploy_path", "deployment_path", "purpose", "form", "remote_repository", "repository", "upstream", "maintenance_state", "recommended_version", "successor_id", "common_configuration_reference", "runbook_reference", "role", "access_method", "responsibility_boundary", "authoritative_reference", "superseded_by", "steps_reference", "stop_condition_reference", "rollback_reference", "verification_method", "executable_status", "kind", "rationale_reference", "decision_evidence_reference", "gateway_reference", "vpn_reference", "account", "credential_type", "access_reference"}
 	for _, key := range stringFields {
 		if value, exists := m[key]; exists {
 			if _, ok := value.(string); !ok {
@@ -782,7 +804,7 @@ func invalidMarkdownFieldReason(m map[string]any) string {
 			}
 		}
 	}
-	listFields := []string{"ip", "ips", "constraints", "allowed_operations", "forbidden_operations", "owned", "domains", "domain", "parent", "host", "instances", "related", "languages", "preconditions", "cidrs", "access_locations"}
+	listFields := []string{"ip", "ips", "constraints", "access_prerequisites", "allowed_operations", "forbidden_operations", "owned", "domains", "domain", "parent", "host", "instances", "related", "languages", "preconditions", "cidrs", "access_locations"}
 	for _, key := range listFields {
 		if value, exists := m[key]; exists && !isStringOrStringList(value) {
 			return "invalid frontmatter field type; record excluded"
@@ -983,6 +1005,9 @@ func machineDetails(m map[string]any, kindField, configuredKind string) (*graph.
 	d.OperationConstraints = stringList(m["constraints"])
 	d.AllowedOperations = stringList(m["allowed_operations"])
 	d.ForbiddenOperations = stringList(m["forbidden_operations"])
+	d.AccessMethod = firstString(m, "access_method")
+	d.AccessPrerequisites = stringList(m["access_prerequisites"])
+	d.ResponsibilityBoundary = firstString(m, "responsibility_boundary")
 	d.Spec = firstString(m, "spec")
 	// role/roles is the machine's job in the fleet, kept verbatim because it is
 	// free-form operator vocabulary rather than a closed enumeration.
@@ -1270,6 +1295,23 @@ func safeReference(sourcePath, raw string, known map[string]bool) (string, bool)
 func validHosts(a, b graph.NodeType) bool {
 	return (a == graph.Hardware && b == graph.Machine) || (a == graph.Machine && (b == graph.Machine || b == graph.SoftwareInstance))
 }
+// stringMap turns a frontmatter map into map[string]string, ignoring entries
+// whose value is not a plain scalar. Used for free-form specification tables
+// such as hardware memory/disk sizes.
+func stringMap(value any) map[string]string {
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for key, item := range raw {
+		if text := strings.TrimSpace(fmt.Sprint(item)); text != "" && text != "<nil>" {
+			out[key] = text
+		}
+	}
+	return out
+}
+
 func canonicalSourceID(id string, mappings []graph.IdentityMapping) string {
 	for _, mapping := range mappings {
 		if mapping.SourceID == id {

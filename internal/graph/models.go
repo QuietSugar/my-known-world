@@ -15,6 +15,10 @@ type HardwareDetails struct {
 	Location             string            `json:"location,omitempty"`
 	Specifications       map[string]string `json:"specifications,omitempty"`
 	Status               string            `json:"status,omitempty"`
+	// MACs records the physical network interfaces of the device. A device
+	// often has several (LAN and WAN sides), and the value is what identifies
+	// the box on the wire, so it is worth keeping structured.
+	MACs                 []string          `json:"macs,omitempty"`
 	AccessReference      string            `json:"accessReference,omitempty"`
 	MaintenanceReference string            `json:"maintenanceReference,omitempty"`
 }
