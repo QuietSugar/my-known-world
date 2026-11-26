@@ -78,8 +78,10 @@ ssh svc "docker exec hall-pgsql psql -U myknownworld -d myknownworld -tAc \
   \"SELECT md5(string_agg(id,',' ORDER BY id)) FROM nodes\""
 ```
 
-清理注册表后必须再跑一次 `sync-wiki.sh`（`/home/dev/deploy/my-known-world/sync-wiki.sh`），
-再取一次指纹——两次都相同才算安全。
+清理注册表后应**重启应用**（`docker compose up -d app`）再取一次指纹——两次都相同才算安全。
+
+> `sync-wiki.sh` 已于 2026-11-26 删除并禁止恢复：它的实现是全量 DELETE + INSERT，
+> 误跑会覆盖库中所有直接编辑。数据只在库中维护，见 hub 的 `AGENTS.md`。
 
 ## 四、密码可读性（改动 `cmdb_local_secrets` 后必做）
 

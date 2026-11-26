@@ -57,11 +57,14 @@
    curl -s -k "https://mkw.svc.hp.hall/api/nodes?limit=1"   # id 应为 UUID
    ```
 
-6. **同步一次并确认零重复**
+6. **重启应用并确认零重复**
    ```bash
-   /home/dev/deploy/my-known-world/sync-wiki.sh
-   # 节点数必须仍是切换前的值
+   ssh svc 'cd /home/svc/deploy/my-known-world && docker compose up -d app'
+   # 节点数与切换前一致，无悬空关系
    ```
+
+   > 这里原写的是跑 `sync-wiki.sh`。该脚本已于 2026-11-26 删除（全量覆盖会抹掉库中
+   > 直接编辑），重启应用即可验证迁移与数据完好。
 
 ## 四、失败回滚
 
