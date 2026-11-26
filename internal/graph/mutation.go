@@ -56,8 +56,15 @@ func (g *Graph) ApplyManualMutation(m ManualMutation) (*Graph, error) {
 		if m.Node == nil || m.ID == "" || m.Relation != nil {
 			return nil, errors.New("updateNode requires id and node only")
 		}
-		var err error
-		candidate, err = candidate.UpdateNode(m.ID, *m.Node)
+		existing, ok := candidate.Node(m.ID)
+		if !ok {
+			return nil, fmt.Errorf("node %q not found", m.ID)
+		}
+		merged, err := mergeNodeDetail(existing, *m.Node)
+		if err != nil {
+			return nil, err
+		}
+		candidate, err = candidate.UpdateNode(m.ID, merged)
 		if err != nil {
 			return nil, err
 		}
@@ -170,4 +177,118 @@ func DiffGraphs(before, after *Graph) MutationDelta {
 	var ignored []string
 	diff(oldA, newA, &d.AddedAssertions, &ignored, &d.DeletedAssertions)
 	return d
+}
+
+// mergeNodeDetail overlays the fields a caller actually supplied onto an
+// existing node's typed details.
+//
+// The managed-update surface lets callers send a partial nested object, e.g.
+// only {"hardware": {"specifications": {"memory": "..."}}}. Passing that to
+// UpdateNode directly replaces the whole detail struct, dropping every field
+// the caller did not mention — on 2026-11-26 an edit to h618's memory silently
+// erased model, macs, location and status while still reporting success.
+//
+// Only keys present in patch are applied, and nested maps merge key by key so
+// that changing one specification keeps the others. Clearing a field requires
+// sending an explicit empty value at the top level.
+func mergeNodeDetail(current, patch Node) (Node, error) {
+	merged := patch
+	merged.ID = current.ID
+	merged.Type = current.Type
+	if merged.Name == "" {
+		merged.Name = current.Name
+	}
+	if merged.Lifecycle == "" {
+		merged.Lifecycle = current.Lifecycle
+	}
+	if merged.ModelVersion == 0 {
+		merged.ModelVersion = current.ModelVersion
+	}
+	if merged.Source == "" {
+		merged.Source = current.Source
+	}
+	if merged.EvidenceKind == "" {
+		merged.EvidenceKind = current.EvidenceKind
+	}
+	if merged.Certainty == "" {
+		merged.Certainty = current.Certainty
+	}
+	merged.Hardware = mergeDetailStruct(current.Hardware, patch.Hardware)
+	merged.Machine = mergeDetailStruct(current.Machine, patch.Machine)
+	merged.SoftwareInstance = mergeDetailStruct(current.SoftwareInstance, patch.SoftwareInstance)
+	merged.SoftwareProject = mergeDetailStruct(current.SoftwareProject, patch.SoftwareProject)
+	merged.Product = mergeDetailStruct(current.Product, patch.Product)
+	merged.Document = mergeDetailStruct(current.Document, patch.Document)
+	merged.Runbook = mergeDetailStruct(current.Runbook, patch.Runbook)
+	merged.WorkItem = mergeDetailStruct(current.WorkItem, patch.WorkItem)
+	merged.Network = mergeDetailStruct(current.Network, patch.Network)
+	merged.AccountCredential = mergeDetailStruct(current.AccountCredential, patch.AccountCredential)
+	return merged, nil
+}
+
+// mergeDetailStruct merges patch over current by JSON key, recursing into maps.
+func mergeDetailStruct[T any](current, patch *T) *T {
+	if patch == nil {
+		return current
+	}
+	if current == nil {
+		return patch
+	}
+	base, err := json.Marshal(current)
+	if err != nil {
+		return patch
+	}
+	overlay, err := json.Marshal(patch)
+	if err != nil {
+		return patch
+	}
+	var merged map[string]any
+	if err = json.Unmarshal(base, &merged); err != nil {
+		return patch
+	}
+	var changes map[string]any
+	if err = json.Unmarshal(overlay, &changes); err != nil {
+		return patch
+	}
+	applyDetailChanges(merged, changes)
+	raw, err := json.Marshal(merged)
+	if err != nil {
+		return patch
+	}
+	out := new(T)
+	if err = json.Unmarshal(raw, out); err != nil {
+		return patch
+	}
+	return out
+}
+
+// applyDetailChanges writes non-empty patch keys into target, merging nested
+// maps key by key instead of replacing them.
+func applyDetailChanges(target, patch map[string]any) {
+	for key, value := range patch {
+		if detailValueEmpty(value) {
+			continue
+		}
+		if nested, ok := value.(map[string]any); ok {
+			if existing, ok := target[key].(map[string]any); ok {
+				applyDetailChanges(existing, nested)
+				continue
+			}
+		}
+		target[key] = value
+	}
+}
+
+func detailValueEmpty(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return true
+	case string:
+		return v == ""
+	case []any:
+		return len(v) == 0
+	case map[string]any:
+		return len(v) == 0
+	}
+	return false
 }
