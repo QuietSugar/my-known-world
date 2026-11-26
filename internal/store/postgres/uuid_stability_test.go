@@ -108,6 +108,49 @@ func TestUUIDsSurviveSnapshotRewrite(t *testing.T) {
 	}
 }
 
+// TestNewNodeUUIDEqualsID guards migration 023: a brand-new node must get its own
+// id as UUID. Before that fix the trigger called gen_random_uuid(), so freshly
+// imported nodes ended up with id != uuid while migrated nodes had id == uuid,
+// leaving callers unsure which value to reference.
+func TestNewNodeUUIDEqualsID(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	store := openTestStore(t)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Node IDs must be UUIDs for this rule to apply, which is what the importer
+	// produces once identityMappings are in place.
+	const vmID = "14d9f61c-368c-4dd4-ab0c-68daf4998dc8"
+	const svcID = "c860c2d6-c296-426d-88a5-1c6605555fa0"
+	g := graph.New()
+	if err := g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Me", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []graph.Node{
+		{ID: vmID, Type: graph.Machine, Name: "vm128", Lifecycle: "active", Source: "wiki", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1,
+			Machine: &graph.MachineDetails{Hostname: "vm128.test"}},
+		{ID: svcID, Type: graph.SoftwareInstance, Name: "samba", Lifecycle: "active", Source: "wiki", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1,
+			SoftwareInstance: &graph.SoftwareInstanceDetails{DeploymentPath: "/srv/samba"}},
+	} {
+		if err := g.Publish(n, graph.Relation{ID: "anchor-" + n.ID, Predicate: graph.KnowsAbout, To: n.ID, Source: "wiki", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SaveSnapshot(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+
+	var got string
+	if err := store.db.QueryRowContext(ctx, `SELECT uuid::text FROM nodes WHERE id = $1`, vmID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != vmID {
+		t.Fatalf("new node %s got UUID %s; want its own id", vmID, got)
+	}
+}
+
 // TestUUIDsAreDistinctAndPersisted guards the basic contract: every entity has a
 // UUID, and no two entities share one.
 func TestUUIDsAreDistinctAndPersisted(t *testing.T) {
