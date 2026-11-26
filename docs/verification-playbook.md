@@ -37,8 +37,8 @@ POSTGRES_TEST_DSN="postgres://<user>:<pw>@127.0.0.1:<port>/mkw_integration_test?
 
 ## 一·五、撤销已下线，改用备份 + 逻辑删除
 
-撤销原先的实现是「每次写存两份整图快照」，131 节点时单份 84–397 KB，历史表
-已占 5.9 MB，且一次改 IP 就要重写整张图。所以移除：
+撤销原先的实现是「每次写存两份整图快照」，快照体积随图规模线性增长，
+历史表迅速膨胀，且一次改 IP 就要重写整张图。所以移除：
 
 - 数据库不再存操作快照，`graph_mutation_operations` 只留 `action`/`recorded_at` 作审计
 - API 与前端不再提供撤销入口
@@ -167,7 +167,7 @@ ssh svc "docker exec -i hall-pgsql pg_restore --list" < <dump> | grep -c "TABLE 
 
 | 位置 | 资产 | 看 hub | 看库 |
 |---|---|---|---|
-| mkw `internal/**` | 60 个 Go 测试 | ✗ | ✗ |
+| mkw `internal/**` | Go 测试 | ✗ | ✗ |
 | hub `tooling/check-docs.py` | 链接与结构检查 | ✓ | ✗ |
 | mkw `scripts/parity-report.py` | frontmatter 逐值比对 | ✓ | ✓ |
 | mkw `scripts/verify-migration.py` | 消失事实查库 | ✓ | ✓ |
@@ -183,8 +183,8 @@ ssh svc "docker exec -i hall-pgsql pg_restore --list" < <dump> | grep -c "TABLE 
    「我引用的这个 UUID 在库里真的存在吗」。这类检查只能由 mkw 侧补。
 
 3. **只有单向覆盖**。四个 Python 脚本都是「以 hub 为起点去库里找」。
-   没有反向检查「库里每个节点是否被 hub 覆盖」——131 个节点里只有 58 个来自
-   hub-wiki，剩下 73 个（旧 CMDB 迁移）没有验证。
+   没有反向检查「库里每个节点是否被 hub 覆盖」——库中存在大量来自旧 CMDB 迁移、
+   不经 hall-wiki 导入的节点，它们没有验证。数量需现查，不写死。
 
 4. **职责重叠**。`parity-report`（frontmatter）、`verify-migration`（原文事实）、
    `find-missing-facts`（正文明细）三者都在回答「这条事实入库了吗」，
@@ -213,8 +213,8 @@ ssh svc "docker exec -i hall-pgsql pg_restore --list" < <dump> | grep -c "TABLE 
   属于设计问题而非工程问题。且目前单人维护，该检查防的是「改完忘同步」，
   收益有限。
 - **统一入口**：包一层 `--all` 半小时可做，但**解决不了口径问题**。
-  `parity-report` 说 376 字段零缺口、`verify-migration` 说 85 条未确认，
-  两者都对但结论相反（一个查 frontmatter 值，一个查原文消失项）。
+  `parity-report` 说零缺口、`verify-migration` 说一批未确认，两者都对但结论相反
+  （一个查 frontmatter 值，一个查原文消失项）。
   统一入口只是把混乱收进一个文件。
 
 更值得做的「删除前必须证明在别处存在」的机制，本质是语义判断——要区分
@@ -234,6 +234,6 @@ ssh svc "docker exec -i hall-pgsql pg_restore --list" < <dump> | grep -c "TABLE 
 
 ### 在此之前
 
-按现有方式运行，命令见第一节至第七节。已知的 85 条「未确认」分类见
-`docs/migration-report.md`：其中 56 条是路径转 UUID 的合法结果，其余为历史日期、
+按现有方式运行，命令见第一节至第七节。「未确认」条目的分类构成需现跑
+`verify-migration.py compare` 查看，其中多数是路径转 UUID 的合法结果，其余为历史日期、
 WireGuard 内网地址等本就不入库的事实。
