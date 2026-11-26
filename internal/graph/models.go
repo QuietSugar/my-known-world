@@ -10,17 +10,17 @@ import (
 )
 
 type HardwareDetails struct {
-	Category             string            `json:"category,omitempty"`
-	Model                string            `json:"model,omitempty"`
-	Location             string            `json:"location,omitempty"`
-	Specifications       map[string]string `json:"specifications,omitempty"`
-	Status               string            `json:"status,omitempty"`
+	Category       string            `json:"category,omitempty"`
+	Model          string            `json:"model,omitempty"`
+	Location       string            `json:"location,omitempty"`
+	Specifications map[string]string `json:"specifications,omitempty"`
+	Status         string            `json:"status,omitempty"`
 	// MACs records the physical network interfaces of the device. A device
 	// often has several (LAN and WAN sides), and the value is what identifies
 	// the box on the wire, so it is worth keeping structured.
-	MACs                 []string          `json:"macs,omitempty"`
-	AccessReference      string            `json:"accessReference,omitempty"`
-	MaintenanceReference string            `json:"maintenanceReference,omitempty"`
+	MACs                 []string `json:"macs,omitempty"`
+	AccessReference      string   `json:"accessReference,omitempty"`
+	MaintenanceReference string   `json:"maintenanceReference,omitempty"`
 }
 type ResourceClaim struct {
 	Kind  string `json:"kind"`
@@ -101,11 +101,15 @@ type ProductDetails struct {
 	RunbookReference             string `json:"runbookReference,omitempty"`
 }
 type DocumentDetails struct {
-	Role                   string     `json:"role,omitempty"`
-	AuthoritativeReference string     `json:"authoritativeReference,omitempty"`
-	Effective              bool       `json:"effective"`
-	LastVerified           *time.Time `json:"lastVerified,omitempty"`
-	SupersededBy           string     `json:"supersededBy,omitempty"`
+	Role                   string `json:"role,omitempty"`
+	AuthoritativeReference string `json:"authoritativeReference,omitempty"`
+	Effective              bool   `json:"effective"`
+	// Notes carries the short, factual remarks a document records about itself
+	// (for example what a plan already covers). Free text because the source
+	// writes them as prose bullets, and they are read, not computed.
+	Notes        []string   `json:"notes,omitempty"`
+	LastVerified *time.Time `json:"lastVerified,omitempty"`
+	SupersededBy string     `json:"supersededBy,omitempty"`
 }
 type RunbookDetails struct {
 	Scope                  string     `json:"scope,omitempty"`

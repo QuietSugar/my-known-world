@@ -1166,6 +1166,9 @@ func mappedFields(n graph.Node, m map[string]any) []markdownMappedField {
 		addString("role", "document.role")
 		addString("authoritative_reference", "document.authoritativeReference")
 		addString("superseded_by", "document.supersededBy")
+		if len(d.Notes) > 0 {
+			add("document.notes", append([]string{}, d.Notes...))
+		}
 		if _, exists := m["effective"]; exists {
 			add("document.effective", d.Effective)
 		}
