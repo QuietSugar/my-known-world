@@ -132,7 +132,8 @@ func TestUUIDColumnIsGone(t *testing.T) {
 	for _, table := range []string{"nodes", "relations", "field_assertions"} {
 		var count int
 		if err := store.db.QueryRowContext(ctx,
-			`SELECT count(*) FROM information_schema.columns WHERE table_name=$1 AND column_name='uuid'`, table).Scan(&count); err != nil {
+			`SELECT count(*) FROM information_schema.columns
+			  WHERE table_schema = current_schema() AND table_name=$1 AND column_name='uuid'`, table).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 0 {

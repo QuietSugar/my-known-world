@@ -916,6 +916,84 @@ func (s *Store) mutateWithOptimisticRevision(
 	return result, newRevision, nil
 }
 
+// mergeDetail overlays the fields a caller actually supplied onto an existing
+// detail struct.
+//
+// The MCP patch surface lets callers send a partial nested object, e.g. only
+// {"hardware": {"specifications": {"memory": "..."}}}. Assigning that struct
+// wholesale would drop every field the caller did not mention — on 2026-11-26 a
+// real edit to h618's memory silently erased model, macs, location and status.
+// Merging by JSON key keeps unspecified fields intact.
+//
+// Only keys present in patch are applied, so a caller cannot clear a field by
+// omitting it; clearing requires sending an explicit empty value.
+func isEmptyPatchValue(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return true
+	case string:
+		return v == ""
+	case []any:
+		return len(v) == 0
+	case map[string]any:
+		return len(v) == 0
+	}
+	return false
+}
+
+func mergeDetail[T any](current, patch *T) *T {
+	if patch == nil {
+		return current
+	}
+	if current == nil {
+		return patch
+	}
+	base, err := json.Marshal(current)
+	if err != nil {
+		return patch
+	}
+	overlay, err := json.Marshal(patch)
+	if err != nil {
+		return patch
+	}
+	merged := map[string]any{}
+	if err = json.Unmarshal(base, &merged); err != nil {
+		return patch
+	}
+	changes := map[string]any{}
+	if err = json.Unmarshal(overlay, &changes); err != nil {
+		return patch
+	}
+	for key, value := range changes {
+		if isEmptyPatchValue(value) {
+			continue
+		}
+		// map 内部也要逐键合并，否则 specifications 这类字段会被整体替换：
+		// 只改 memory 会把 cpu、disk 等一并抹掉。
+		if nested, ok := value.(map[string]any); ok {
+			if existing, ok := merged[key].(map[string]any); ok {
+				for nk, nv := range nested {
+					if isEmptyPatchValue(nv) {
+						continue
+					}
+					existing[nk] = nv
+				}
+				continue
+			}
+		}
+		merged[key] = value
+	}
+	raw, err := json.Marshal(merged)
+	if err != nil {
+		return patch
+	}
+	out := new(T)
+	if err = json.Unmarshal(raw, out); err != nil {
+		return patch
+	}
+	return out
+}
+
 func (s *Store) PatchNode(ctx context.Context, id string, patch graph.Node, expectedRevision string) (graph.Node, string, error) {
 	if expectedRevision == "" {
 		return graph.Node{}, "", errors.New("expectedRevision is required")
@@ -951,33 +1029,15 @@ func (s *Store) PatchNode(ctx context.Context, id string, patch graph.Node, expe
 		if patch.ModelVersion > 0 {
 			merged.ModelVersion = patch.ModelVersion
 		}
-		if patch.Machine != nil {
-			merged.Machine = patch.Machine
-		}
-		if patch.SoftwareProject != nil {
-			merged.SoftwareProject = patch.SoftwareProject
-		}
-		if patch.SoftwareInstance != nil {
-			merged.SoftwareInstance = patch.SoftwareInstance
-		}
-		if patch.Product != nil {
-			merged.Product = patch.Product
-		}
-		if patch.Runbook != nil {
-			merged.Runbook = patch.Runbook
-		}
-		if patch.WorkItem != nil {
-			merged.WorkItem = patch.WorkItem
-		}
-		if patch.Document != nil {
-			merged.Document = patch.Document
-		}
-		if patch.Network != nil {
-			merged.Network = patch.Network
-		}
-		if patch.Hardware != nil {
-			merged.Hardware = patch.Hardware
-		}
+		merged.Machine = mergeDetail(merged.Machine, patch.Machine)
+		merged.SoftwareProject = mergeDetail(merged.SoftwareProject, patch.SoftwareProject)
+		merged.SoftwareInstance = mergeDetail(merged.SoftwareInstance, patch.SoftwareInstance)
+		merged.Product = mergeDetail(merged.Product, patch.Product)
+		merged.Runbook = mergeDetail(merged.Runbook, patch.Runbook)
+		merged.WorkItem = mergeDetail(merged.WorkItem, patch.WorkItem)
+		merged.Document = mergeDetail(merged.Document, patch.Document)
+		merged.Network = mergeDetail(merged.Network, patch.Network)
+		merged.Hardware = mergeDetail(merged.Hardware, patch.Hardware)
 		next, err := current.UpdateNode(id, merged)
 		if err != nil {
 			return nil, nil, err
