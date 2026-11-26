@@ -3,8 +3,6 @@
 package materialize
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,7 +30,10 @@ type IdentityMapping struct {
 	NodeID   string `yaml:"nodeId" json:"nodeId"`
 }
 type ManifestNode struct {
-	ID           string             `yaml:"id" json:"id"`
+	ID string `yaml:"id" json:"id"`
+	// Name keeps the manifest readable on its own; the file path already
+	// carries a slug, but consumers should not have to parse it back.
+	Name         string             `yaml:"name,omitempty" json:"name,omitempty"`
 	Type         graph.NodeType     `yaml:"type" json:"type"`
 	Lifecycle    string             `yaml:"lifecycle,omitempty" json:"lifecycle,omitempty"`
 	EvidenceKind graph.EvidenceKind `yaml:"evidenceKind" json:"evidenceKind"`
@@ -78,6 +79,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 	nodes := g.Nodes()
 	nodePaths := map[string]string{}
 	nodeTypes := map[string]graph.NodeType{}
+	taken := map[string]int{}
 	for _, n := range nodes {
 		if options.Source != "" && n.Source != options.Source {
 			continue
@@ -85,7 +87,13 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 		if len(options.Types) > 0 && !options.Types[n.Type] {
 			continue
 		}
-		path := nodePath(n.ID, n.Type)
+		path := nodePath(n)
+		// 同一类型下可能重名（三台机器各有一个 homer），加序号避免撞车。
+		if taken[path] > 0 {
+			base := strings.TrimSuffix(path, ".md")
+			path = fmt.Sprintf("%s-%d.md", base, taken[base+".md"]+1)
+		}
+		taken[path]++
 		nodePaths[n.ID] = path
 		nodeTypes[n.ID] = n.Type
 	}
@@ -109,7 +117,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 			report.Unsupported = append(report.Unsupported, n.ID+": certainty "+string(n.Certainty)+" is descriptive only; current Markdown importer cannot restore it")
 		}
 		fileOutputs[path] = content
-		manifest.Nodes = append(manifest.Nodes, ManifestNode{ID: n.ID, Type: n.Type, Lifecycle: n.Lifecycle, EvidenceKind: n.EvidenceKind, Certainty: n.Certainty, Path: path})
+		manifest.Nodes = append(manifest.Nodes, ManifestNode{ID: n.ID, Name: n.Name, Type: n.Type, Lifecycle: n.Lifecycle, EvidenceKind: n.EvidenceKind, Certainty: n.Certainty, Path: path})
 		manifest.IdentityMappings = append(manifest.IdentityMappings, IdentityMapping{SourceID: path, NodeID: n.ID})
 	}
 	for _, r := range g.Relations() {
@@ -134,6 +142,7 @@ func Export(root string, g *graph.Graph, options Options) (Manifest, Report, err
 	sort.Slice(manifest.Relations, func(i, j int) bool { return manifest.Relations[i].ID < manifest.Relations[j].ID })
 	sort.Strings(report.Unsupported)
 	report.Unsupported = unique(report.Unsupported)
+	fileOutputs["README.md"] = renderIndex(manifest)
 	for name, value := range map[string]any{"manifest.yaml": manifest, "unsupported.yaml": report, "config.yaml": importConfig(manifest)} {
 		b, err := yaml.Marshal(value)
 		if err != nil {
@@ -229,9 +238,84 @@ func writeFile(path string, data []byte, overwrite bool) error {
 	}
 	return cerr
 }
-func nodePath(id string, typ graph.NodeType) string {
-	sum := sha256.Sum256([]byte(id))
-	return filepath.ToSlash(filepath.Join("entities", string(typ), hex.EncodeToString(sum[:12])+".md"))
+
+// nodePath places a node under a human-readable folder tree:
+//
+//	entities/<Type>/<readable-name>--<id prefix>.md
+//
+// The old form was entities/<Type>/<sha256 prefix>.md, which could not be
+// browsed or recognised on disk. The short id suffix keeps the name unique
+// without making the file unreadable.
+// renderIndex writes a browsable entry point. Without it the export is a pile
+// of files with no way in — the folder tree exists on disk but nobody can see
+// its shape from the root.
+func renderIndex(m Manifest) []byte {
+	byType := map[string][]ManifestNode{}
+	for _, n := range m.Nodes {
+		byType[string(n.Type)] = append(byType[string(n.Type)], n)
+	}
+	types := make([]string, 0, len(byType))
+	for t := range byType {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+
+	var b strings.Builder
+	b.WriteString("# MyKnownWorld 导出快照\n\n")
+	b.WriteString("> 由 `myknownworld-materialize` 从只读 API 生成，不含密码、历史与断言哈希。\n")
+	b.WriteString("> 完整机器可读清单见 [manifest.yaml](manifest.yaml)，未导出项见 [unsupported.yaml](unsupported.yaml)。\n\n")
+	b.WriteString("每个实体一个文件，文件名形如 `名称--<id 前 8 位>.md`；frontmatter 的\n")
+	b.WriteString("`relations[].target` 是相对链接，可直接在编辑器里跳转。\n\n")
+	for _, t := range types {
+		items := byType[t]
+		sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+		b.WriteString(fmt.Sprintf("## %s（%d）\n\n", t, len(items)))
+		for _, n := range items {
+			label := n.Name
+			if label == "" {
+				label = n.ID
+			}
+			b.WriteString(fmt.Sprintf("- [%s](%s)\n", label, n.Path))
+		}
+		b.WriteString("\n")
+	}
+	return []byte(b.String())
+}
+
+func nodePath(n graph.Node) string {
+	slug := slugName(n.Name)
+	if slug == "" {
+		slug = "unnamed"
+	}
+	suffix := n.ID
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	return filepath.ToSlash(filepath.Join("entities", string(n.Type), slug+"--"+suffix+".md"))
+}
+
+// slugName turns a display name into a filesystem-safe fragment that keeps
+// CJK characters readable and replaces separators that would break paths.
+func slugName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r >= 0x4e00 && r <= 0x9fff:
+			b.WriteRune(r)
+		case r == '-', r == '_':
+			b.WriteRune(r)
+		case r == ' ', r == '/', r == '\\', r == '(', r == ')', r == '（', r == '）', r == '.', r == ':':
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	for strings.Contains(out, "--") {
+		out = strings.ReplaceAll(out, "--", "-")
+	}
+	if len([]rune(out)) > 60 {
+		out = string([]rune(out)[:60])
+	}
+	return out
 }
 func unique(in []string) []string {
 	if len(in) == 0 {

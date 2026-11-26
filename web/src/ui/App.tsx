@@ -12,6 +12,7 @@ import {
   Database,
   ExternalLink,
   FileText,
+  FolderTree,
   GitBranch,
   HardDrive,
   Layers3,
@@ -41,6 +42,7 @@ import {
   type MutationPlan
 } from './api'
 import { GraphExplorer } from './GraphExplorer'
+import { FolderBrowser } from './FolderBrowser'
 import { DetailsEditor } from './DetailsEditor'
 import { ProjectWorkspace } from './ProjectWorkspace'
 import { ProjectReadOnlyView } from './ProjectReadOnlyView'
@@ -69,7 +71,7 @@ import { WriteTokenModal } from './WriteTokenModal'
 import { EditNameModal } from './EditNameModal'
 import { antdColorForType } from './theme'
 
-type View = 'overview' | 'all' | 'impact' | 'provisional' | 'sources' | 'sync' | 'explore' | 'workspace' | 'docs' | 'project-focus' | 'project-readonly'
+type View = 'overview' | 'all' | 'browse' | 'impact' | 'provisional' | 'sources' | 'sync' | 'explore' | 'workspace' | 'docs' | 'project-focus' | 'project-readonly'
 
 const labels: Record<NodeType, string> = {
   Self: '我自己',
@@ -184,7 +186,7 @@ const getInitialView = (): View => {
   const params = new URLSearchParams(window.location.search)
   const v = params.get('view') as View
   const validViews: View[] = [
-    'overview', 'all', 'impact', 'provisional', 'sources',
+    'overview', 'all', 'browse', 'impact', 'provisional', 'sources',
     'sync', 'explore', 'workspace', 'docs', 'project-focus', 'project-readonly'
   ]
   if (validViews.includes(v)) return v
@@ -631,6 +633,9 @@ export function App() {
         <button className={`nav-item ${view === 'all' ? 'active' : ''}`} onClick={() => { setView('all'); setFilter('all') }}>
           <Database size={17} /><span>全部对象</span><span className="nav-count">{Math.max(0, nodes.length - 1)}</span>
         </button>
+        <button className={`nav-item ${view === 'browse' ? 'active' : ''}`} onClick={() => setView('browse')}>
+          <FolderTree size={17} /><span>目录浏览</span>
+        </button>
         <button className={`nav-item ${view === 'impact' ? 'active' : ''}`} onClick={() => { setView('impact'); setFilter('all') }}>
           <Activity size={17} /><span>影响范围</span>
         </button>
@@ -823,6 +828,7 @@ export function App() {
                   <SyncBatchPanel onApplied={refresh} />
                 </>
               )}
+              {view === 'browse' && <FolderBrowser nodes={nodes} relations={relations} onOpen={focus} />}
               {view === 'explore' && <GraphExplorer nodes={nodes} onSelect={focus} />}
               {view === 'workspace' && (
                 <ProjectWorkspace

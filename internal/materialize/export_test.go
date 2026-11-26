@@ -205,3 +205,63 @@ func TestExportKeepsNumericFieldsAsIntegers(t *testing.T) {
 		t.Fatalf("fractional values must be preserved: %v", got)
 	}
 }
+
+// TestExportUsesReadableFolderPaths guards the folder-browsable layout: files
+// are named after the entity, not a hash, and the root has an index that links
+// to every one of them.
+func TestExportUsesReadableFolderPaths(t *testing.T) {
+	g := graph.New()
+	if err := g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", ModelVersion: 1}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []graph.Node{
+		{ID: "aaaaaaaa-1111-4111-8111-111111111111", Type: graph.SoftwareInstance, Name: "homer", Lifecycle: "active", Source: "fixture", ModelVersion: 1,
+			SoftwareInstance: &graph.SoftwareInstanceDetails{Ports: []int{10090}}},
+		{ID: "bbbbbbbb-2222-4222-8222-222222222222", Type: graph.SoftwareInstance, Name: "homer", Lifecycle: "active", Source: "fixture", ModelVersion: 1,
+			SoftwareInstance: &graph.SoftwareInstanceDetails{Ports: []int{10190}}},
+		{ID: "cccccccc-3333-4333-8333-333333333333", Type: graph.Machine, Name: "vm247 内部测试机", Lifecycle: "active", Source: "fixture", ModelVersion: 1,
+			Machine: &graph.MachineDetails{Hostname: "vm247"}},
+	} {
+		if err := g.AddNode(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	root := filepath.Join(t.TempDir(), "export")
+	manifest, _, err := Export(root, g, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Paths carry the readable name plus a short id, never a bare hash.
+	for _, n := range manifest.Nodes {
+		if !strings.Contains(n.Path, n.Name[:4]) && n.Name != "Self" {
+			t.Errorf("path %q does not contain the entity name %q", n.Path, n.Name)
+		}
+		if !strings.HasSuffix(n.Path, ".md") {
+			t.Errorf("path %q is not markdown", n.Path)
+		}
+	}
+	// Two nodes sharing a name must not collide.
+	seen := map[string]bool{}
+	for _, n := range manifest.Nodes {
+		if seen[n.Path] {
+			t.Fatalf("duplicate path %q", n.Path)
+		}
+		seen[n.Path] = true
+	}
+	// The index exists and every link resolves.
+	indexPath := filepath.Join(root, "README.md")
+	index, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("index missing: %v", err)
+	}
+	for _, n := range manifest.Nodes {
+		if !strings.Contains(string(index), n.Path) {
+			t.Errorf("index does not link to %q", n.Path)
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(n.Path))); err != nil {
+			t.Errorf("linked file missing: %q", n.Path)
+		}
+	}
+}
