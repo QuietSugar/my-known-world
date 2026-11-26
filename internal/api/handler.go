@@ -848,6 +848,11 @@ func (h *Handler) applyManualMutation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "mutation_rejected", err.Error())
 		return
 	}
+	// The write landed; drop the cached snapshot or every read until it expires
+	// returns the pre-write graph. On 2026-11-26 this made a successful patch
+	// look like a no-op when verifying, and the wrong conclusion was drawn
+	// (blamed the build cache instead).
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{"applied": true, "plan": plan})
 }
 
@@ -872,6 +877,7 @@ func (h *Handler) createNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "create_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusCreated, map[string]any{"created": body.Node.ID})
 }
 
@@ -902,6 +908,7 @@ func (h *Handler) updateNode(w http.ResponseWriter, r *http.Request, path string
 		writeError(w, http.StatusConflict, "update_rejected", err.Error())
 		return
 	}
+	h.invalidateCache()
 	writeJSON(w, http.StatusOK, map[string]any{"updated": id})
 }
 func (h *Handler) addRelation(w http.ResponseWriter, r *http.Request) {
