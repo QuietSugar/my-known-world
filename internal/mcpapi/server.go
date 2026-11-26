@@ -240,7 +240,11 @@ type EntityInput struct {
 	ID string `json:"id"`
 }
 type EntityOutput struct {
-	Node                   graph.Node            `json:"node"`
+	Node graph.Node `json:"node"`
+	// Revision is the graph fingerprint this read is based on. graph_patch_node
+	// and graph_retire_node require it as expectedRevision, so a read must
+	// report it; otherwise callers have to guess or reach for /metrics.
+	Revision               string                `json:"revision"`
 	SelfRelationCategories []graph.Predicate     `json:"selfRelationCategories"`
 	SelfPathNodes          []graph.Node          `json:"selfPathNodes"`
 	SelfPathRelations      []graph.Relation      `json:"selfPathRelations"`
@@ -292,6 +296,9 @@ func (s *Server) entity(ctx context.Context, _ *mcp.CallToolRequest, in EntityIn
 			}
 		}
 		out.SelfPathRelations = g.RelationsForPath(ids)
+	}
+	if revision, err := g.Fingerprint(); err == nil {
+		out.Revision = revision
 	}
 	out.Assertions = graph.BuildAssertionViews(g.AssertionsForNode(in.ID), nil)
 	if s.assertions != nil {

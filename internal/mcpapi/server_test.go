@@ -108,6 +108,15 @@ func TestMCPStreamableHTTPToolsAreTypedReadOnlyAndMatchGraphSemantics(t *testing
 	if containsAll(string(entityJSON), `"valueHash"`) {
 		t.Fatalf("entity output leaked assertion hash: %s", entityJSON)
 	}
+	// graph_patch_node requires expectedRevision; a read that does not report
+	// the revision forces callers to guess or scrape /metrics.
+	var entityOut EntityOutput
+	if err = json.Unmarshal(entityJSON, &entityOut); err != nil {
+		t.Fatal(err)
+	}
+	if entityOut.Revision == "" {
+		t.Fatalf("entity output must report the graph revision: %s", entityJSON)
+	}
 	impact, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "graph_impact", Arguments: map[string]any{}})
 	if err != nil {
 		t.Fatal(err)
