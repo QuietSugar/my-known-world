@@ -19,7 +19,7 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-const schemaVersion = 23
+const schemaVersion = 1
 
 var ErrEmptySnapshot = errors.New("database contains no graph snapshot")
 
@@ -54,16 +54,50 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	files := []string{"migrations/001_init.sql", "migrations/002_provenance.sql", "migrations/003_sync_state.sql", "migrations/004_identity_mappings.sql", "migrations/005_provisional_review.sql", "migrations/006_running_periods.sql", "migrations/007_sync_history.sql", "migrations/008_field_assertions.sql", "migrations/009_typed_model_details.sql", "migrations/010_graph_change_history.sql", "migrations/011_field_resolutions.sql", "migrations/012_source_policies.sql", "migrations/013_usage_relationships.sql", "migrations/014_network_model.sql", "migrations/015_reversible_operations.sql", "migrations/016_sync_undo_metadata.sql", "migrations/017_node_evidence_reference.sql", "migrations/018_markdown_relationships.sql", "migrations/019_project_view_templates.sql", "migrations/020_entity_uuids.sql", "migrations/021_business_columns_to_uuid.sql", "migrations/022_legacy_id_survives_snapshot.sql", "migrations/023_new_nodes_reuse_id_as_uuid.sql"}
+
+	// schema_migrations records which schema version a database already has.
+	// It has to exist before the version can be read, so it is created here
+	// rather than inside the schema file.
+	if _, err = tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		version    integer PRIMARY KEY,
+		applied_at timestamptz NOT NULL DEFAULT now()
+	)`); err != nil {
+		return fmt.Errorf("create migration table: %w", err)
+	}
+
+	// A single schema file describes the whole current structure. The previous
+	// 24-step incremental chain is gone: it only ever needed to run on the
+	// development and svc databases, both of which are already at the final
+	// shape, and keeping one-way steps around made every start replay them.
+	files := []string{"migrations/001_schema.sql"}
 	if len(files) != schemaVersion {
 		return fmt.Errorf("migration list has %d entries, schemaVersion is %d", len(files), schemaVersion)
 	}
+
+	applied := map[int]bool{}
+	rows, queryErr := tx.QueryContext(ctx, `SELECT version FROM schema_migrations`)
+	if queryErr != nil {
+		return fmt.Errorf("read applied migrations: %w", queryErr)
+	}
+	for rows.Next() {
+		var version int
+		if scanErr := rows.Scan(&version); scanErr != nil {
+			rows.Close()
+			return fmt.Errorf("read applied migrations: %w", scanErr)
+		}
+		applied[version] = true
+	}
+	rows.Close()
+
 	for index, name := range files {
+		version := index + 1
+		if applied[version] {
+			continue
+		}
 		migration, readErr := migrations.ReadFile(name)
 		if readErr != nil {
 			return readErr
 		}
-		version := index + 1
 		if _, err = tx.ExecContext(ctx, string(migration)); err != nil {
 			return fmt.Errorf("apply schema migration %d: %w", version, err)
 		}
@@ -91,10 +125,7 @@ func (s *Store) SaveSnapshot(ctx context.Context, g *graph.Graph) error {
 	if _, err = tx.ExecContext(ctx, `DELETE FROM sync_sources`); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM relations`); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM nodes`); err != nil {
+	if err = clearGraphRows(ctx, tx); err != nil {
 		return err
 	}
 	for _, n := range g.Nodes() {
@@ -170,7 +201,7 @@ func (s *Store) LoadSnapshot(ctx context.Context) (*graph.Graph, error) {
 
 func loadSnapshotTx(ctx context.Context, tx *sql.Tx) (*graph.Graph, error) {
 	g := graph.New()
-	rows, err := tx.QueryContext(ctx, `SELECT n.id,COALESCE(n.uuid::text,''),n.type,n.name,n.lifecycle,n.last_confirmed,n.model_version,n.source,n.evidence_kind,n.certainty,n.candidate_type,n.review_status,n.review_questions,n.evidence_reference,rp.started_at,rp.ended_at,rp.deployed_version,rp.verification_at,rp.verification_result,rp.evidence_ref,hd.details,md.details,spd.details,sid.details,acd.details,pd.details,dd.details,rd.details,wid.details,nd.details FROM nodes n LEFT JOIN running_periods rp ON rp.node_id=n.id LEFT JOIN hardware_details hd ON hd.node_id=n.id LEFT JOIN machine_details md ON md.node_id=n.id LEFT JOIN software_project_details spd ON spd.node_id=n.id LEFT JOIN software_instance_details sid ON sid.node_id=n.id LEFT JOIN account_credential_details acd ON acd.node_id=n.id LEFT JOIN product_details pd ON pd.node_id=n.id LEFT JOIN document_details dd ON dd.node_id=n.id LEFT JOIN runbook_details rd ON rd.node_id=n.id LEFT JOIN work_item_details wid ON wid.node_id=n.id LEFT JOIN network_details nd ON nd.node_id=n.id ORDER BY n.id`)
+	rows, err := tx.QueryContext(ctx, `SELECT n.id,n.id,n.type,n.name,n.lifecycle,n.last_confirmed,n.model_version,n.source,n.evidence_kind,n.certainty,n.candidate_type,n.review_status,n.review_questions,n.evidence_reference,rp.started_at,rp.ended_at,rp.deployed_version,rp.verification_at,rp.verification_result,rp.evidence_ref,hd.details,md.details,spd.details,sid.details,acd.details,pd.details,dd.details,rd.details,wid.details,nd.details FROM nodes n LEFT JOIN running_periods rp ON rp.node_id=n.id LEFT JOIN hardware_details hd ON hd.node_id=n.id LEFT JOIN machine_details md ON md.node_id=n.id LEFT JOIN software_project_details spd ON spd.node_id=n.id LEFT JOIN software_instance_details sid ON sid.node_id=n.id LEFT JOIN account_credential_details acd ON acd.node_id=n.id LEFT JOIN product_details pd ON pd.node_id=n.id LEFT JOIN document_details dd ON dd.node_id=n.id LEFT JOIN runbook_details rd ON rd.node_id=n.id LEFT JOIN work_item_details wid ON wid.node_id=n.id LEFT JOIN network_details nd ON nd.node_id=n.id ORDER BY n.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1479,11 +1510,38 @@ func insertAssertions(ctx context.Context, tx *sql.Tx, g *graph.Graph) error {
 	return nil
 }
 
-func saveSnapshotTx(ctx context.Context, tx *sql.Tx, g *graph.Graph) error {
+// detailTables lists every table that hangs off a node. They used to be cleared
+// by an ON DELETE CASCADE from nodes.uuid; that foreign key went away when the
+// redundant uuid column was removed, so snapshot replacement has to clear them
+// explicitly or a re-save collides with the previous row.
+var detailTables = []string{
+	"hardware_details", "machine_details", "software_project_details",
+	"software_instance_details", "account_credential_details", "product_details",
+	"document_details", "runbook_details", "work_item_details", "network_details",
+	"running_periods",
+}
+
+// clearGraphRows removes the previous snapshot, children first.
+func clearGraphRows(ctx context.Context, tx *sql.Tx) error {
+	for _, table := range detailTables {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table); err != nil {
+			return fmt.Errorf("clear %s: %w", table, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM field_assertions`); err != nil {
+		return fmt.Errorf("clear field_assertions: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM relations`); err != nil {
-		return err
+		return fmt.Errorf("clear relations: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM nodes`); err != nil {
+		return fmt.Errorf("clear nodes: %w", err)
+	}
+	return nil
+}
+
+func saveSnapshotTx(ctx context.Context, tx *sql.Tx, g *graph.Graph) error {
+	if err := clearGraphRows(ctx, tx); err != nil {
 		return err
 	}
 	for _, n := range g.Nodes() {

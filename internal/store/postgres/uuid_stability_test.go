@@ -8,40 +8,42 @@ import (
 	"github.com/QuietSugar/my-known-world/internal/graph"
 )
 
-// uuidFingerprint collects every persisted entity UUID so tests can assert that
-// identity survives a snapshot rewrite. The snapshot save path is DELETE + INSERT,
-// so without the registry triggers every UUID would be regenerated.
-func uuidFingerprints(t *testing.T, store *Store) (map[string]string, map[string]string) {
+// entityIDs collects every persisted node and relation id.
+//
+// Identity is carried by the id column alone since migration 024 dropped the
+// duplicate uuid column. The snapshot save path is DELETE + INSERT, so if an id
+// were regenerated on rewrite, external references would silently break.
+func entityIDs(t *testing.T, store *Store) (map[string]bool, map[string]bool) {
 	t.Helper()
 	ctx := context.Background()
 
-	nodes := map[string]string{}
-	rows, err := store.db.QueryContext(ctx, `SELECT id, uuid::text FROM nodes`)
+	nodes := map[string]bool{}
+	rows, err := store.db.QueryContext(ctx, `SELECT id FROM nodes`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for rows.Next() {
-		var id, uuid string
-		if err := rows.Scan(&id, &uuid); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			t.Fatal(err)
 		}
-		nodes[id] = uuid
+		nodes[id] = true
 	}
 	rows.Close()
 
-	relations := map[string]string{}
-	relRows, err := store.db.QueryContext(ctx, `SELECT id, uuid::text FROM relations`)
+	relations := map[string]bool{}
+	relRows, err := store.db.QueryContext(ctx, `SELECT id FROM relations`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for relRows.Next() {
-		var id, uuid string
-		if err := relRows.Scan(&id, &uuid); err != nil {
+		var id string
+		if err := relRows.Scan(&id); err != nil {
 			relRows.Close()
 			t.Fatal(err)
 		}
-		relations[id] = uuid
+		relations[id] = true
 	}
 	relRows.Close()
 	return nodes, relations
@@ -70,10 +72,10 @@ func seedUUIDGraph(t *testing.T) *graph.Graph {
 	return g
 }
 
-// TestUUIDsSurviveSnapshotRewrite is the regression guard for identity stability.
-// It failed in practice on 2026-11-26 when a snapshot save regenerated every UUID,
-// which silently broke external references.
-func TestUUIDsSurviveSnapshotRewrite(t *testing.T) {
+// TestIdentitySurvivesSnapshotRewrite is the regression guard for identity
+// stability. It failed in practice on 2026-11-26 when a snapshot save
+// regenerated every UUID, which silently broke external references.
+func TestIdentitySurvivesSnapshotRewrite(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	store := openTestStore(t)
@@ -85,7 +87,7 @@ func TestUUIDsSurviveSnapshotRewrite(t *testing.T) {
 	if err := store.SaveSnapshot(ctx, g); err != nil {
 		t.Fatal(err)
 	}
-	firstNodes, firstRels := uuidFingerprints(t, store)
+	firstNodes, firstRels := entityIDs(t, store)
 	if len(firstNodes) == 0 || len(firstRels) == 0 {
 		t.Fatal("expected seeded entities to be persisted")
 	}
@@ -94,110 +96,61 @@ func TestUUIDsSurviveSnapshotRewrite(t *testing.T) {
 	if err := store.SaveSnapshot(ctx, g); err != nil {
 		t.Fatal(err)
 	}
-	secondNodes, secondRels := uuidFingerprints(t, store)
+	secondNodes, secondRels := entityIDs(t, store)
 
-	for id, want := range firstNodes {
-		if got := secondNodes[id]; got != want {
-			t.Errorf("node %q changed UUID across snapshot save: %s -> %s", id, want, got)
+	for id := range firstNodes {
+		if !secondNodes[id] {
+			t.Errorf("node %q disappeared across snapshot save", id)
 		}
 	}
-	for id, want := range firstRels {
-		if got := secondRels[id]; got != want {
-			t.Errorf("relation %q changed UUID across snapshot save: %s -> %s", id, want, got)
+	for id := range firstRels {
+		if !secondRels[id] {
+			t.Errorf("relation %q disappeared across snapshot save", id)
+		}
+	}
+	for id := range secondNodes {
+		if !firstNodes[id] {
+			t.Errorf("unexpected node %q appeared after snapshot save", id)
+		}
+	}
+	for id := range secondRels {
+		if !firstRels[id] {
+			t.Errorf("unexpected relation %q appeared after snapshot save", id)
 		}
 	}
 }
 
-// TestNewNodeUUIDEqualsID guards migration 023: a brand-new node must get its own
-// id as UUID. Before that fix the trigger called gen_random_uuid(), so freshly
-// imported nodes ended up with id != uuid while migrated nodes had id == uuid,
-// leaving callers unsure which value to reference.
-func TestNewNodeUUIDEqualsID(t *testing.T) {
+// TestUUIDColumnIsGone guards migration 024: the duplicate uuid column and its
+// registries must not come back, since identity now lives in the id column.
+func TestUUIDColumnIsGone(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	store := openTestStore(t)
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-
-	// Node IDs must be UUIDs for this rule to apply, which is what the importer
-	// produces once identityMappings are in place.
-	const vmID = "14d9f61c-368c-4dd4-ab0c-68daf4998dc8"
-	const svcID = "c860c2d6-c296-426d-88a5-1c6605555fa0"
-	g := graph.New()
-	if err := g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Me", ModelVersion: 1}); err != nil {
-		t.Fatal(err)
-	}
-	for _, n := range []graph.Node{
-		{ID: vmID, Type: graph.Machine, Name: "vm128", Lifecycle: "active", Source: "wiki", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1,
-			Machine: &graph.MachineDetails{Hostname: "vm128.test"}},
-		{ID: svcID, Type: graph.SoftwareInstance, Name: "samba", Lifecycle: "active", Source: "wiki", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed, ModelVersion: 1,
-			SoftwareInstance: &graph.SoftwareInstanceDetails{DeploymentPath: "/srv/samba"}},
-	} {
-		if err := g.Publish(n, graph.Relation{ID: "anchor-" + n.ID, Predicate: graph.KnowsAbout, To: n.ID, Source: "wiki", EvidenceKind: graph.EvidenceDocument, Certainty: graph.CertaintyConfirmed}); err != nil {
+	for _, table := range []string{"nodes", "relations", "field_assertions"} {
+		var count int
+		if err := store.db.QueryRowContext(ctx,
+			`SELECT count(*) FROM information_schema.columns WHERE table_name=$1 AND column_name='uuid'`, table).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
+		if count != 0 {
+			t.Errorf("%s still has a uuid column; identity must live in id", table)
+		}
 	}
-	if err := store.SaveSnapshot(ctx, g); err != nil {
-		t.Fatal(err)
-	}
-
-	var got string
-	if err := store.db.QueryRowContext(ctx, `SELECT uuid::text FROM nodes WHERE id = $1`, vmID).Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if got != vmID {
-		t.Fatalf("new node %s got UUID %s; want its own id", vmID, got)
+	for _, table := range []string{"node_uuid_registry", "relation_uuid_registry", "assertion_uuid_registry"} {
+		var exists bool
+		if err := store.db.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if exists {
+			t.Errorf("registry table %q should have been dropped", table)
+		}
 	}
 }
 
-// TestUUIDsAreDistinctAndPersisted guards the basic contract: every entity has a
-// UUID, and no two entities share one.
-func TestUUIDsAreDistinctAndPersisted(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	store := openTestStore(t)
-	if err := store.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveSnapshot(ctx, seedUUIDGraph(t)); err != nil {
-		t.Fatal(err)
-	}
-
-	nodes, rels := uuidFingerprints(t, store)
-	seen := map[string]string{}
-	for id, uuid := range nodes {
-		if uuid == "" {
-			t.Errorf("node %q has no UUID", id)
-		}
-		if prev, dup := seen[uuid]; dup {
-			t.Errorf("nodes %q and %q share UUID %s", prev, id, uuid)
-		}
-		seen[uuid] = id
-	}
-	for id, uuid := range rels {
-		if uuid == "" {
-			t.Errorf("relation %q has no UUID", id)
-		}
-		if prev, dup := seen[uuid]; dup {
-			t.Errorf("relation %q reuses UUID %s of %q", id, uuid, prev)
-		}
-		seen[uuid] = id
-	}
-
-	// Every relation endpoint must point at a node that has a UUID.
-	var dangling int
-	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM relations r
-		WHERE NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = r.from_id)
-		   OR NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = r.to_id)`).Scan(&dangling); err != nil {
-		t.Fatal(err)
-	}
-	if dangling != 0 {
-		t.Fatalf("relations with dangling endpoints: %d", dangling)
-	}
-}
-
-// TestLoadedNodesCarryUUID ensures the read path surfaces the UUID, otherwise
+// TestLoadedNodesCarryUUID ensures the read path surfaces the identity, otherwise
 // clients cannot use the stable identifier.
 func TestLoadedNodesCarryUUID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -1,3 +1,0 @@
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS candidate_type text NOT NULL DEFAULT '';
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS review_status text NOT NULL DEFAULT '';
-ALTER TABLE nodes ADD COLUMN IF NOT EXISTS review_questions jsonb NOT NULL DEFAULT '[]'::jsonb;
