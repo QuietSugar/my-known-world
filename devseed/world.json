@@ -1,0 +1,2029 @@
+{
+  "source": "synthetic-dev-seed",
+  "parserVersion": "seed-v1",
+  "nodes": [
+    {
+      "id": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "type": "Self",
+      "name": "Self",
+      "lifecycle": null,
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1
+    },
+    {
+      "id": "d5f61cd0-803f-54af-8343-79d186cefcef",
+      "type": "Hardware",
+      "name": "Sample laptop",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "hardware": {
+        "category": "laptop",
+        "model": "Example Book 14",
+        "location": "mobile",
+        "specifications": {
+          "cpu": "8 cores",
+          "memory": "16 GiB"
+        },
+        "status": "active",
+        "accessReference": "synthetic://access/hw-laptop",
+        "maintenanceReference": "synthetic://maintenance/hw-laptop"
+      }
+    },
+    {
+      "id": "6521b7d8-cfb7-5e64-9fad-8f9b724688c3",
+      "type": "Hardware",
+      "name": "Sample tower",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "hardware": {
+        "category": "desktop",
+        "model": "Example Tower 7",
+        "location": "fixed@home",
+        "specifications": {
+          "cpu": "8 cores",
+          "memory": "16 GiB"
+        },
+        "status": "active",
+        "accessReference": "synthetic://access/hw-tower",
+        "maintenanceReference": "synthetic://maintenance/hw-tower"
+      }
+    },
+    {
+      "id": "807545bd-d825-5c7e-beac-a0eff9457b45",
+      "type": "Hardware",
+      "name": "Sample single-board computer",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "hardware": {
+        "category": "sbc",
+        "model": "Example Pi 5",
+        "location": "fixed@home",
+        "specifications": {
+          "cpu": "8 cores",
+          "memory": "16 GiB"
+        },
+        "status": "active",
+        "accessReference": "synthetic://access/hw-board",
+        "maintenanceReference": "synthetic://maintenance/hw-board"
+      }
+    },
+    {
+      "id": "7e3a6a68-63dc-5d3c-91b5-f85f9dd5c6dd",
+      "type": "Machine",
+      "name": "Sample hypervisor",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "hypervisor.lab.test",
+        "ips": [
+          "192.0.2.10"
+        ],
+        "os": "ExampleOS 1.0",
+        "status": "active",
+        "machineKind": "rig",
+        "accessMethod": "ssh ops@192.0.2.10",
+        "spec": "8 vCPU / 16 GiB / 512 GiB",
+        "roles": [
+          "virtualization"
+        ],
+        "responsibilityBoundary": "Synthetic host used only for development fixtures",
+        "allowedOperations": [
+          "read logs",
+          "restart services"
+        ],
+        "forbiddenOperations": [
+          "wipe storage"
+        ],
+        "owned": [
+          "synthetic owner"
+        ],
+        "resources": [
+          {
+            "kind": "disk",
+            "name": "root",
+            "scope": "system"
+          }
+        ]
+      }
+    },
+    {
+      "id": "d741e665-3cfa-5dbc-8d72-24c2121d107e",
+      "type": "Machine",
+      "name": "Sample application VM",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "app.lab.test",
+        "ips": [
+          "192.0.2.11"
+        ],
+        "os": "Ubuntu 22.04",
+        "status": "active",
+        "machineKind": "rig",
+        "accessMethod": "ssh ops@192.0.2.11",
+        "spec": "4 vCPU / 8 GiB / 100 GiB",
+        "roles": [
+          "deployment"
+        ],
+        "responsibilityBoundary": "Synthetic host used only for development fixtures",
+        "allowedOperations": [
+          "read logs",
+          "restart services"
+        ],
+        "forbiddenOperations": [
+          "wipe storage"
+        ],
+        "owned": [
+          "synthetic owner"
+        ],
+        "resources": [
+          {
+            "kind": "disk",
+            "name": "root",
+            "scope": "system"
+          }
+        ]
+      }
+    },
+    {
+      "id": "10384904-6dc8-5806-a07d-b5d5dcb79cbb",
+      "type": "Machine",
+      "name": "Sample database VM",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "db.lab.test",
+        "ips": [
+          "192.0.2.12"
+        ],
+        "os": "Ubuntu 22.04",
+        "status": "active",
+        "machineKind": "rig",
+        "accessMethod": "ssh ops@192.0.2.12",
+        "spec": "4 vCPU / 16 GiB / 200 GiB",
+        "roles": [
+          "database"
+        ],
+        "responsibilityBoundary": "Synthetic host used only for development fixtures",
+        "allowedOperations": [
+          "read logs",
+          "restart services"
+        ],
+        "forbiddenOperations": [
+          "wipe storage"
+        ],
+        "owned": [
+          "synthetic owner"
+        ],
+        "resources": [
+          {
+            "kind": "disk",
+            "name": "root",
+            "scope": "system"
+          }
+        ]
+      }
+    },
+    {
+      "id": "abf07165-2449-577d-b202-a57b29c917f7",
+      "type": "Machine",
+      "name": "Sample home server",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "homeserver.lab.test",
+        "ips": [
+          "198.51.100.20"
+        ],
+        "os": "Ubuntu 24.04",
+        "status": "active",
+        "machineKind": "rig",
+        "accessMethod": "ssh ops@198.51.100.20",
+        "spec": "4 vCPU / 8 GiB / 50 GiB",
+        "roles": [
+          "storage"
+        ],
+        "responsibilityBoundary": "Synthetic host used only for development fixtures",
+        "allowedOperations": [
+          "read logs",
+          "restart services"
+        ],
+        "forbiddenOperations": [
+          "wipe storage"
+        ],
+        "owned": [
+          "synthetic owner"
+        ],
+        "resources": [
+          {
+            "kind": "disk",
+            "name": "root",
+            "scope": "system"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c9140bdf-de5b-5acd-9e05-78468d877e61",
+      "type": "Machine",
+      "name": "Sample gateway router",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "gateway.lab.test",
+        "ips": [
+          "198.51.100.1"
+        ],
+        "os": "OpenWrt 23.05",
+        "status": "active",
+        "machineKind": "shared",
+        "accessMethod": "ssh ops@198.51.100.1",
+        "spec": null,
+        "roles": [
+          "network"
+        ],
+        "responsibilityBoundary": "Synthetic host used only for development fixtures",
+        "allowedOperations": [
+          "read logs",
+          "restart services"
+        ],
+        "forbiddenOperations": [
+          "wipe storage"
+        ],
+        "owned": [
+          "synthetic owner"
+        ],
+        "resources": [
+          {
+            "kind": "disk",
+            "name": "root",
+            "scope": "system"
+          }
+        ]
+      }
+    },
+    {
+      "id": "f1bfb076-0f56-566a-b23f-db0279065043",
+      "type": "Machine",
+      "name": "Sample remote VPS",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "vps.lab.test",
+        "ips": [
+          "203.0.113.30"
+        ],
+        "os": "Debian 12",
+        "status": "active",
+        "machineKind": "rig",
+        "accessMethod": "ssh ops@203.0.113.30",
+        "spec": "2 vCPU / 4 GiB / 40 GiB",
+        "roles": [
+          "public-entry"
+        ],
+        "responsibilityBoundary": "Synthetic host used only for development fixtures",
+        "allowedOperations": [
+          "read logs",
+          "restart services"
+        ],
+        "forbiddenOperations": [
+          "wipe storage"
+        ],
+        "owned": [
+          "synthetic owner"
+        ],
+        "resources": [
+          {
+            "kind": "disk",
+            "name": "root",
+            "scope": "system"
+          }
+        ]
+      }
+    },
+    {
+      "id": "93e61ab5-f346-5adf-891a-0b471d07a30a",
+      "type": "Machine",
+      "name": "Sample VM template",
+      "lifecycle": "template",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "template.lab.test",
+        "ips": [
+          "192.0.2.100"
+        ],
+        "os": "Ubuntu 22.04",
+        "status": "template",
+        "machineKind": "virtual",
+        "accessMethod": "ssh ops@192.0.2.100",
+        "spec": "2 vCPU / 4 GiB / 20 GiB",
+        "roles": null,
+        "responsibilityBoundary": "Synthetic host used only for development fixtures",
+        "allowedOperations": [
+          "read logs",
+          "restart services"
+        ],
+        "forbiddenOperations": [
+          "wipe storage"
+        ],
+        "owned": [
+          "synthetic owner"
+        ],
+        "resources": [
+          {
+            "kind": "disk",
+            "name": "root",
+            "scope": "system"
+          }
+        ]
+      }
+    },
+    {
+      "id": "62cf7ac9-e35e-541c-9346-c75825c97bcb",
+      "type": "Machine",
+      "name": "Sample retired host",
+      "lifecycle": "retired",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "machine": {
+        "hostname": "retired.lab.test",
+        "ips": [
+          "198.51.100.99"
+        ],
+        "os": "Debian 11",
+        "status": "retired",
+        "machineKind": "rig",
+        "accessMethod": "ssh ops@198.51.100.99",
+        "spec": "2 vCPU / 4 GiB / 40 GiB",
+        "roles": null,
+        "responsibilityBoundary": "Synthetic host used only for development fixtures",
+        "allowedOperations": [
+          "read logs",
+          "restart services"
+        ],
+        "forbiddenOperations": [
+          "wipe storage"
+        ],
+        "owned": [
+          "synthetic owner"
+        ],
+        "resources": [
+          {
+            "kind": "disk",
+            "name": "root",
+            "scope": "system"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c17ec54b-5e2f-5665-8f0e-fc8839fa3343",
+      "type": "SoftwareInstance",
+      "name": "sample-web",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "nginx",
+        "deploymentPath": "/opt/sample/web/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "reverse proxy for lab services"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-web"
+        ],
+        "ports": [
+          80,
+          443
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 80
+          }
+        ],
+        "domains": [
+          "web.lab.test"
+        ],
+        "runtimeIdentity": "sample-nginx"
+      }
+    },
+    {
+      "id": "008c0e4a-18f1-5b8a-834a-a8e64ff8416a",
+      "type": "SoftwareInstance",
+      "name": "sample-api",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "app-server",
+        "deploymentPath": "/opt/sample/api/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "stateless",
+          "restart policy: unless-stopped"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-api"
+        ],
+        "ports": [
+          8080
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 8080
+          }
+        ],
+        "domains": [
+          "api.lab.test"
+        ]
+      }
+    },
+    {
+      "id": "ae74987a-4000-5aaf-9bc1-1dacf512cc99",
+      "type": "SoftwareInstance",
+      "name": "sample-cache",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "redis",
+        "deploymentPath": "/opt/sample/cache/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "memory limit 512MiB"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-cache"
+        ],
+        "ports": [
+          6379
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 6379
+          }
+        ],
+        "runtimeIdentity": "sample-redis"
+      }
+    },
+    {
+      "id": "5a5c41c4-af76-513b-b517-8a0a1d4952d7",
+      "type": "SoftwareInstance",
+      "name": "sample-db",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "postgres",
+        "deploymentPath": "/opt/sample/db/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "data volume on separate disk"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-db"
+        ],
+        "ports": [
+          5432
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 5432
+          }
+        ],
+        "runtimeIdentity": "sample-postgres"
+      }
+    },
+    {
+      "id": "8de2c760-329b-57d5-8ac4-b211f60f1fcd",
+      "type": "SoftwareInstance",
+      "name": "sample-db-backup",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "pg-dump",
+        "deploymentPath": "/opt/sample/db/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "nightly dump at 03:00",
+          "retention 14 days"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-db-backup"
+        ]
+      }
+    },
+    {
+      "id": "311ce466-be78-591b-bc8e-ed666243dd8b",
+      "type": "SoftwareInstance",
+      "name": "sample-registry",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "artifact-registry",
+        "deploymentPath": "/opt/sample/registry/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "hosts internal build artifacts"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-registry"
+        ],
+        "ports": [
+          8081
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 8081
+          }
+        ],
+        "domains": [
+          "registry.lab.test"
+        ],
+        "runtimeIdentity": "sample-artifact-registry"
+      }
+    },
+    {
+      "id": "06964c2e-a676-5319-b3ef-10f80ca7a4b2",
+      "type": "SoftwareInstance",
+      "name": "sample-git",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "git-server",
+        "deploymentPath": "/opt/sample/git/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "private repositories"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-git"
+        ],
+        "ports": [
+          3000
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 3000
+          }
+        ],
+        "domains": [
+          "git.lab.test"
+        ],
+        "runtimeIdentity": "sample-git-server"
+      }
+    },
+    {
+      "id": "d7a91926-5580-5345-9b2a-af0a7f18b3b6",
+      "type": "SoftwareInstance",
+      "name": "sample-dashboard",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "dashboard",
+        "deploymentPath": "/opt/sample/dashboard/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "start page for lab links"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-dashboard"
+        ],
+        "ports": [
+          80
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 80
+          }
+        ],
+        "domains": [
+          "dash.lab.test"
+        ],
+        "runtimeIdentity": "sample-dashboard"
+      }
+    },
+    {
+      "id": "bffc1b9f-efee-5d36-9d4a-fa4cc18e9a3f",
+      "type": "SoftwareInstance",
+      "name": "sample-metrics",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "metrics-agent",
+        "deploymentPath": "/opt/sample/metrics/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "scrapes all hosts every 30s"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-metrics"
+        ],
+        "ports": [
+          9090
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 9090
+          }
+        ],
+        "runtimeIdentity": "sample-metrics-agent"
+      }
+    },
+    {
+      "id": "9c514813-efbe-5757-829c-1a0d9ecec809",
+      "type": "SoftwareInstance",
+      "name": "sample-dns",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "dns-resolver",
+        "deploymentPath": "/etc/sample/dns/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "authoritative for lab.test"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-dns"
+        ],
+        "ports": [
+          53
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 53
+          }
+        ],
+        "runtimeIdentity": "sample-dns-resolver"
+      }
+    },
+    {
+      "id": "fc18342c-f536-5874-979a-3931b7102f0f",
+      "type": "SoftwareInstance",
+      "name": "sample-vpn",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "vpn-gateway",
+        "deploymentPath": "/etc/sample/vpn/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "wireguard",
+          "peers managed by script"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-vpn"
+        ],
+        "ports": [
+          51820
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 51820
+          }
+        ],
+        "runtimeIdentity": "sample-vpn-gateway"
+      }
+    },
+    {
+      "id": "92b4d01d-8716-5cad-a6e3-f18254a281aa",
+      "type": "SoftwareInstance",
+      "name": "sample-wiki",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "wiki",
+        "deploymentPath": "/srv/sample/wiki/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "public documentation site"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-wiki"
+        ],
+        "ports": [
+          443
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 443
+          }
+        ],
+        "domains": [
+          "wiki.lab.test"
+        ],
+        "runtimeIdentity": "sample-wiki"
+      }
+    },
+    {
+      "id": "afc4f61b-4abb-5067-ba6e-5f74d6237fca",
+      "type": "SoftwareInstance",
+      "name": "sample-sync",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "file-sync",
+        "deploymentPath": "/opt/sample/sync/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "syncs documents between two hosts"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-sync"
+        ],
+        "ports": [
+          8384,
+          22000
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 8384
+          }
+        ],
+        "runtimeIdentity": "sample-file-sync"
+      }
+    },
+    {
+      "id": "3c7937c7-2cd1-554e-af09-593f81146554",
+      "type": "SoftwareInstance",
+      "name": "sample-jump",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "bastion",
+        "deploymentPath": "/etc/sample/jump/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "single entry point for remote access"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-jump"
+        ],
+        "ports": [
+          22
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 22
+          }
+        ],
+        "runtimeIdentity": "sample-bastion"
+      }
+    },
+    {
+      "id": "2cb685e0-9a58-5ab7-8b72-6edbeca8b615",
+      "type": "SoftwareInstance",
+      "name": "sample-scheduler",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "job-scheduler",
+        "deploymentPath": "/opt/sample/scheduler/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "runs cron-like jobs"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-scheduler"
+        ],
+        "ports": [
+          8082
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 8082
+          }
+        ],
+        "runtimeIdentity": "sample-job-scheduler"
+      }
+    },
+    {
+      "id": "7a031493-9a5b-5210-94a3-7cd5e294daf0",
+      "type": "SoftwareInstance",
+      "name": "sample-log",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "log-store",
+        "deploymentPath": "/opt/sample/log/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "rotates at 1GiB"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-log"
+        ],
+        "ports": [
+          9200
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 9200
+          }
+        ],
+        "runtimeIdentity": "sample-log-store"
+      }
+    },
+    {
+      "id": "a7437398-e1fa-5586-bdf4-2f3df7098d64",
+      "type": "SoftwareInstance",
+      "name": "sample-object",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "object-store",
+        "deploymentPath": "/opt/sample/object/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "stores build artifacts"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-object"
+        ],
+        "ports": [
+          9000
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 9000
+          }
+        ],
+        "domains": [
+          "files.lab.test"
+        ],
+        "runtimeIdentity": "sample-object-store"
+      }
+    },
+    {
+      "id": "c34f2650-7455-539d-a88e-212b2e697950",
+      "type": "SoftwareInstance",
+      "name": "sample-proxy",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "http-proxy",
+        "deploymentPath": "/etc/sample/proxy/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "egress proxy for lab hosts"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-proxy"
+        ],
+        "ports": [
+          3128
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 3128
+          }
+        ],
+        "runtimeIdentity": "sample-http-proxy"
+      }
+    },
+    {
+      "id": "b55facbd-adca-5f5f-9995-0cb047207194",
+      "type": "SoftwareInstance",
+      "name": "sample-template-app",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "app-server",
+        "deploymentPath": "/opt/sample/template/",
+        "deploymentState": "deployed",
+        "operationalState": "active",
+        "notes": [
+          "baked into the VM template"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-template-app"
+        ],
+        "ports": [
+          8080
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 8080
+          }
+        ]
+      }
+    },
+    {
+      "id": "a8b4aadb-83b1-5413-82d3-219e310ec72a",
+      "type": "SoftwareInstance",
+      "name": "sample-retired-app",
+      "lifecycle": "stopped",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareInstance": {
+        "productName": "app-server",
+        "deploymentPath": "/opt/sample/retired/",
+        "deploymentState": "deployed",
+        "operationalState": "stopped",
+        "notes": [
+          "decommissioned, kept for history"
+        ],
+        "configurationReferences": [
+          "synthetic://config/svc-retired-app"
+        ],
+        "ports": [
+          8080
+        ],
+        "endpoints": [
+          {
+            "kind": "tcp",
+            "address": "127.0.0.1",
+            "port": 8080
+          }
+        ]
+      }
+    },
+    {
+      "id": "eb641c8b-112f-560f-920c-152d2deb8ded",
+      "type": "AccountCredential",
+      "name": "web-admin",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "accountCredential": {
+        "accessReference": "synthetic://credentials/web-admin",
+        "account": "web-admin",
+        "credentialType": "service account",
+        "purpose": "console login",
+        "scope": "lab.test",
+        "status": "active",
+        "lastVerified": "2026-01-15T00:00:00Z",
+        "rotationAt": "2026-07-15T00:00:00Z"
+      }
+    },
+    {
+      "id": "18c45529-1c81-5351-aff2-d954e178d624",
+      "type": "AccountCredential",
+      "name": "api-token",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "accountCredential": {
+        "accessReference": "synthetic://credentials/api-token",
+        "account": "api-token",
+        "credentialType": "rotating token",
+        "purpose": "API authentication",
+        "scope": "lab.test",
+        "status": "active",
+        "lastVerified": "2026-01-15T00:00:00Z",
+        "rotationAt": "2026-07-15T00:00:00Z"
+      }
+    },
+    {
+      "id": "441d59d5-bef4-58a3-be80-b5354ed723e8",
+      "type": "AccountCredential",
+      "name": "db-owner",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "accountCredential": {
+        "accessReference": "synthetic://credentials/db-owner",
+        "account": "db-owner",
+        "credentialType": "service account",
+        "purpose": "database owner",
+        "scope": "lab.test",
+        "status": "active",
+        "lastVerified": "2026-01-15T00:00:00Z",
+        "rotationAt": "2026-07-15T00:00:00Z"
+      }
+    },
+    {
+      "id": "d2af2590-c138-553b-8edf-1be5dc77bd25",
+      "type": "AccountCredential",
+      "name": "git-admin",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "accountCredential": {
+        "accessReference": "synthetic://credentials/git-admin",
+        "account": "git-admin",
+        "credentialType": "personal account",
+        "purpose": "repository administration",
+        "scope": "lab.test",
+        "status": "active",
+        "lastVerified": "2026-01-15T00:00:00Z",
+        "rotationAt": "2026-07-15T00:00:00Z"
+      }
+    },
+    {
+      "id": "4c6520aa-2eda-5ee4-89d8-6b7479771b43",
+      "type": "AccountCredential",
+      "name": "registry-publisher",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "accountCredential": {
+        "accessReference": "synthetic://credentials/registry-publisher",
+        "account": "registry-publisher",
+        "credentialType": "service account",
+        "purpose": "artifact publishing",
+        "scope": "lab.test",
+        "status": "active",
+        "lastVerified": "2026-01-15T00:00:00Z",
+        "rotationAt": "2026-07-15T00:00:00Z"
+      }
+    },
+    {
+      "id": "87371ae5-a516-5154-95a1-4153f20a6f81",
+      "type": "AccountCredential",
+      "name": "jump-operator",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "accountCredential": {
+        "accessReference": "synthetic://credentials/jump-operator",
+        "account": "jump-operator",
+        "credentialType": "shared account",
+        "purpose": "remote access",
+        "scope": "lab.test",
+        "status": "active",
+        "lastVerified": "2026-01-15T00:00:00Z",
+        "rotationAt": "2026-07-15T00:00:00Z"
+      }
+    },
+    {
+      "id": "7f5dee16-0028-5bc9-80c8-64799bea890f",
+      "type": "Document",
+      "name": "Sample operations handbook",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "document": {
+        "role": "how the sample lab is laid out",
+        "effective": true,
+        "authoritativeReference": "synthetic://docs/handbook",
+        "lastVerified": "2026-01-15T00:00:00Z"
+      }
+    },
+    {
+      "id": "27b511f3-fd30-5522-adf8-18e1d6fcd2ca",
+      "type": "Runbook",
+      "name": "Sample access runbook",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "runbook": {
+        "approvalRequired": true,
+        "executableStatus": "verified",
+        "preconditions": [
+          "VPN connected",
+          "jump host reachable"
+        ],
+        "verificationMethod": "run the check command and compare output",
+        "stepsReference": "synthetic://runbooks/access",
+        "rollbackReference": "synthetic://runbooks/access-rollback",
+        "trigger": "need to reach a lab host",
+        "scope": "lab access"
+      }
+    },
+    {
+      "id": "5d56167d-7117-530a-9e92-bc2cf2854765",
+      "type": "SoftwareProject",
+      "name": "sample-service",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "softwareProject": {
+        "form": "service",
+        "languages": [
+          "Go",
+          "TypeScript"
+        ],
+        "maintenanceState": "active",
+        "purpose": "demonstrates a service deployed across the lab",
+        "remoteRepository": "synthetic://repos/sample-service",
+        "upstream": "synthetic://upstream/sample-service"
+      }
+    },
+    {
+      "id": "eb746103-c65e-5f89-889c-2124f0f492e1",
+      "type": "Network",
+      "name": "Sample lab network",
+      "lifecycle": "active",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed",
+      "modelVersion": 1,
+      "network": {
+        "kind": "lan",
+        "cidrs": [
+          "192.0.2.0/24",
+          "198.51.100.0/24"
+        ],
+        "status": "active",
+        "gatewayReference": "synthetic://access/gateway",
+        "vpnReference": "synthetic://access/vpn",
+        "accessLocations": [
+          "home",
+          "office"
+        ]
+      }
+    },
+    {
+      "id": "a7c5f6e9-9d21-5765-a8a4-5fe8aa41212d",
+      "type": "ProvisionalObject",
+      "name": "Unclassified sample host",
+      "lifecycle": null,
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "provisional",
+      "modelVersion": 1,
+      "candidateType": "Machine",
+      "reviewStatus": "pending",
+      "reviewQuestions": [
+        "Is this a physical machine or a VM?",
+        "Which hardware does it belong to?"
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "46319210-ca3d-5b9b-ac4e-5728d0b8730f",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "d5f61cd0-803f-54af-8343-79d186cefcef",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "686fa319-07fa-5511-a992-1b89be2bb0c8",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "6521b7d8-cfb7-5e64-9fad-8f9b724688c3",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "b0489055-bfb3-50a8-99f2-7c4ff770fdc6",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "807545bd-d825-5c7e-beac-a0eff9457b45",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "f0b4d2d1-393e-5711-beb1-5e707402f8a5",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "7e3a6a68-63dc-5d3c-91b5-f85f9dd5c6dd",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "bb4a87cc-8bd1-5c9f-9edd-33138dec1e25",
+      "from": "d5f61cd0-803f-54af-8343-79d186cefcef",
+      "predicate": "hosts",
+      "to": "7e3a6a68-63dc-5d3c-91b5-f85f9dd5c6dd",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "4a369e45-6cf1-514b-ad80-eb68e2159127",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "d741e665-3cfa-5dbc-8d72-24c2121d107e",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "5f2eada3-85fb-5e0b-9cf6-8340a2c3356e",
+      "from": "7e3a6a68-63dc-5d3c-91b5-f85f9dd5c6dd",
+      "predicate": "hosts",
+      "to": "d741e665-3cfa-5dbc-8d72-24c2121d107e",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "d5a768b6-7590-5e38-b3db-fa51cc9596a0",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "10384904-6dc8-5806-a07d-b5d5dcb79cbb",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "e452f4ec-c3ff-5260-b761-67b15d2186b8",
+      "from": "7e3a6a68-63dc-5d3c-91b5-f85f9dd5c6dd",
+      "predicate": "hosts",
+      "to": "10384904-6dc8-5806-a07d-b5d5dcb79cbb",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "59c31eb8-8b17-51a3-97fc-cdbf78be5c7b",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "abf07165-2449-577d-b202-a57b29c917f7",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "818980a4-61ae-5109-8dc6-cf25247533b9",
+      "from": "6521b7d8-cfb7-5e64-9fad-8f9b724688c3",
+      "predicate": "hosts",
+      "to": "abf07165-2449-577d-b202-a57b29c917f7",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "68a8417c-e965-55ae-9734-ccb683233e62",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "c9140bdf-de5b-5acd-9e05-78468d877e61",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "27c34d91-87c3-5540-95d0-73cd7e524fe8",
+      "from": "807545bd-d825-5c7e-beac-a0eff9457b45",
+      "predicate": "hosts",
+      "to": "c9140bdf-de5b-5acd-9e05-78468d877e61",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "5778bcac-86c1-5dfb-9c54-b2ca73211f77",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "f1bfb076-0f56-566a-b23f-db0279065043",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "d96368a0-fedb-51ef-90d5-3657d87b391f",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "93e61ab5-f346-5adf-891a-0b471d07a30a",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "a607d7b5-add7-5f04-bc04-c8ad6523a23f",
+      "from": "7e3a6a68-63dc-5d3c-91b5-f85f9dd5c6dd",
+      "predicate": "hosts",
+      "to": "93e61ab5-f346-5adf-891a-0b471d07a30a",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "9d3298ff-b306-5931-b12f-175d077d0dde",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "62cf7ac9-e35e-541c-9346-c75825c97bcb",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "a70ceb19-b890-5273-9af7-d477c2c38ff4",
+      "from": "6521b7d8-cfb7-5e64-9fad-8f9b724688c3",
+      "predicate": "hosts",
+      "to": "62cf7ac9-e35e-541c-9346-c75825c97bcb",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "1aa0b169-6835-547a-b2e0-a189cf5e4fa4",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "c17ec54b-5e2f-5665-8f0e-fc8839fa3343",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "1a0b0e50-2364-519d-8e34-6ca0a2c74c04",
+      "from": "d741e665-3cfa-5dbc-8d72-24c2121d107e",
+      "predicate": "hosts",
+      "to": "c17ec54b-5e2f-5665-8f0e-fc8839fa3343",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "6aa511ae-feff-5b01-a237-e1f1a7783eff",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "008c0e4a-18f1-5b8a-834a-a8e64ff8416a",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "ab140776-a172-54d1-be84-936681dba070",
+      "from": "d741e665-3cfa-5dbc-8d72-24c2121d107e",
+      "predicate": "hosts",
+      "to": "008c0e4a-18f1-5b8a-834a-a8e64ff8416a",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "6dc4efa9-1b23-5434-8a24-994e6de82393",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "ae74987a-4000-5aaf-9bc1-1dacf512cc99",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "228488d6-0dae-5b47-b1f8-cfc2ed9c8df3",
+      "from": "d741e665-3cfa-5dbc-8d72-24c2121d107e",
+      "predicate": "hosts",
+      "to": "ae74987a-4000-5aaf-9bc1-1dacf512cc99",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "4071e875-468a-592c-be39-e9c6a4cb3195",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "5a5c41c4-af76-513b-b517-8a0a1d4952d7",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "4394295e-4f43-5c11-9cd2-b080f6680ebd",
+      "from": "10384904-6dc8-5806-a07d-b5d5dcb79cbb",
+      "predicate": "hosts",
+      "to": "5a5c41c4-af76-513b-b517-8a0a1d4952d7",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "d805427a-8d86-5a57-a426-6b87cb861215",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "8de2c760-329b-57d5-8ac4-b211f60f1fcd",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "69b55a93-b490-53b5-bec9-dae031cb3dd4",
+      "from": "10384904-6dc8-5806-a07d-b5d5dcb79cbb",
+      "predicate": "hosts",
+      "to": "8de2c760-329b-57d5-8ac4-b211f60f1fcd",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "93533c6d-f180-5872-8b1f-4c24a24ef67e",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "311ce466-be78-591b-bc8e-ed666243dd8b",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "8713b8ca-b9ce-5e2d-9f42-e068efb3ce3a",
+      "from": "abf07165-2449-577d-b202-a57b29c917f7",
+      "predicate": "hosts",
+      "to": "311ce466-be78-591b-bc8e-ed666243dd8b",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "fa3fe1b6-c064-5c8e-92c1-20309f8e12e3",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "06964c2e-a676-5319-b3ef-10f80ca7a4b2",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "d4b24a33-ea32-5385-86e0-dd3e4f33cf83",
+      "from": "abf07165-2449-577d-b202-a57b29c917f7",
+      "predicate": "hosts",
+      "to": "06964c2e-a676-5319-b3ef-10f80ca7a4b2",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "b12b8f41-7050-5f76-81c6-ac14049fd1b6",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "d7a91926-5580-5345-9b2a-af0a7f18b3b6",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "2a35d58e-2403-506d-8249-5eaa17bfb204",
+      "from": "abf07165-2449-577d-b202-a57b29c917f7",
+      "predicate": "hosts",
+      "to": "d7a91926-5580-5345-9b2a-af0a7f18b3b6",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "777276fc-6fce-58d1-8267-56e25d3eaa45",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "bffc1b9f-efee-5d36-9d4a-fa4cc18e9a3f",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "6d5470d4-2a05-55d8-9831-7d6fd71186d6",
+      "from": "abf07165-2449-577d-b202-a57b29c917f7",
+      "predicate": "hosts",
+      "to": "bffc1b9f-efee-5d36-9d4a-fa4cc18e9a3f",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "34c6f31e-59b0-5f0f-8c52-5c7f03bc9dde",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "9c514813-efbe-5757-829c-1a0d9ecec809",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "72bac3ec-0ac1-5a03-9195-82af29fdb4ef",
+      "from": "c9140bdf-de5b-5acd-9e05-78468d877e61",
+      "predicate": "hosts",
+      "to": "9c514813-efbe-5757-829c-1a0d9ecec809",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "8ce8b634-2a1f-581a-90d7-f957734f7c63",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "fc18342c-f536-5874-979a-3931b7102f0f",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "9ccb9d0c-6049-53be-8739-0354140de99c",
+      "from": "c9140bdf-de5b-5acd-9e05-78468d877e61",
+      "predicate": "hosts",
+      "to": "fc18342c-f536-5874-979a-3931b7102f0f",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "98ed55ac-5db0-5292-8478-f1313d7d954c",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "92b4d01d-8716-5cad-a6e3-f18254a281aa",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "c783b92c-5d0f-5202-a1e4-14051b3f0d46",
+      "from": "f1bfb076-0f56-566a-b23f-db0279065043",
+      "predicate": "hosts",
+      "to": "92b4d01d-8716-5cad-a6e3-f18254a281aa",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "28d7ee12-74a4-500a-836b-46682a86b2ed",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "afc4f61b-4abb-5067-ba6e-5f74d6237fca",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "db190079-8b83-5bcd-9639-e8718b05475c",
+      "from": "d741e665-3cfa-5dbc-8d72-24c2121d107e",
+      "predicate": "hosts",
+      "to": "afc4f61b-4abb-5067-ba6e-5f74d6237fca",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "cd92b460-b861-5ab5-b9d1-7cb4da88755f",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "3c7937c7-2cd1-554e-af09-593f81146554",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "e9a14c25-a7bb-5fa3-ae57-c05e897205a8",
+      "from": "f1bfb076-0f56-566a-b23f-db0279065043",
+      "predicate": "hosts",
+      "to": "3c7937c7-2cd1-554e-af09-593f81146554",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "c8623711-4df2-55dc-9b55-48d4ae878495",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "2cb685e0-9a58-5ab7-8b72-6edbeca8b615",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "4345b99d-bb00-52b5-b80f-08b474494784",
+      "from": "d741e665-3cfa-5dbc-8d72-24c2121d107e",
+      "predicate": "hosts",
+      "to": "2cb685e0-9a58-5ab7-8b72-6edbeca8b615",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "3f58faa6-6984-5deb-b6aa-a42158787fe3",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "7a031493-9a5b-5210-94a3-7cd5e294daf0",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "40f9d116-def3-55fc-8775-511d6b1410d8",
+      "from": "10384904-6dc8-5806-a07d-b5d5dcb79cbb",
+      "predicate": "hosts",
+      "to": "7a031493-9a5b-5210-94a3-7cd5e294daf0",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "d62da856-289b-5ce0-948b-8235b1af2482",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "a7437398-e1fa-5586-bdf4-2f3df7098d64",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "bdb49ea5-34f8-5609-affd-61ff72db0c7a",
+      "from": "abf07165-2449-577d-b202-a57b29c917f7",
+      "predicate": "hosts",
+      "to": "a7437398-e1fa-5586-bdf4-2f3df7098d64",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "8a614d38-ea0c-53ac-8a48-3728e2819170",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "c34f2650-7455-539d-a88e-212b2e697950",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "47c8554b-533a-5395-addf-2cb27aa6e82a",
+      "from": "f1bfb076-0f56-566a-b23f-db0279065043",
+      "predicate": "hosts",
+      "to": "c34f2650-7455-539d-a88e-212b2e697950",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "fc21879f-f037-5b49-8231-f15a9516fd54",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "b55facbd-adca-5f5f-9995-0cb047207194",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "e4316c47-7f49-555d-bfb7-3373126435cf",
+      "from": "93e61ab5-f346-5adf-891a-0b471d07a30a",
+      "predicate": "hosts",
+      "to": "b55facbd-adca-5f5f-9995-0cb047207194",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "2e5740f9-13db-5c8e-99bd-dbb4e6eba5dd",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "a8b4aadb-83b1-5413-82d3-219e310ec72a",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "15087a75-ffa2-5007-b209-3742bbd0254f",
+      "from": "62cf7ac9-e35e-541c-9346-c75825c97bcb",
+      "predicate": "hosts",
+      "to": "a8b4aadb-83b1-5413-82d3-219e310ec72a",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "f99417c7-3e07-5021-af57-a7c38ad97cf6",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "eb641c8b-112f-560f-920c-152d2deb8ded",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "1c5bc8f7-94a6-50e0-85e7-ec3b20fb786f",
+      "from": "c17ec54b-5e2f-5665-8f0e-fc8839fa3343",
+      "predicate": "hasCredential",
+      "to": "eb641c8b-112f-560f-920c-152d2deb8ded",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "e377885a-da64-534a-9115-8344c8f8a159",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "18c45529-1c81-5351-aff2-d954e178d624",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "ce9a5d2e-c84c-5ab1-b716-83a14bf849f1",
+      "from": "008c0e4a-18f1-5b8a-834a-a8e64ff8416a",
+      "predicate": "hasCredential",
+      "to": "18c45529-1c81-5351-aff2-d954e178d624",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "2853b43a-edc7-5b16-ab0b-d51b07c034f2",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "441d59d5-bef4-58a3-be80-b5354ed723e8",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "392218ef-653f-5cc1-8786-10b5d7fd70b4",
+      "from": "5a5c41c4-af76-513b-b517-8a0a1d4952d7",
+      "predicate": "hasCredential",
+      "to": "441d59d5-bef4-58a3-be80-b5354ed723e8",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "913a856f-074b-57a8-9452-591c57ff6ea5",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "d2af2590-c138-553b-8edf-1be5dc77bd25",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "1f2dfa75-e14b-5c95-af58-41e746f0d805",
+      "from": "06964c2e-a676-5319-b3ef-10f80ca7a4b2",
+      "predicate": "hasCredential",
+      "to": "d2af2590-c138-553b-8edf-1be5dc77bd25",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "70d5cbf3-1097-5637-9255-0e1e8d197625",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "4c6520aa-2eda-5ee4-89d8-6b7479771b43",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "250b1568-08cc-5e57-a72d-b8d1b4da0404",
+      "from": "311ce466-be78-591b-bc8e-ed666243dd8b",
+      "predicate": "hasCredential",
+      "to": "4c6520aa-2eda-5ee4-89d8-6b7479771b43",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "d8b2268a-a07e-5fc3-b3b7-70d8d59b98fb",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "87371ae5-a516-5154-95a1-4153f20a6f81",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "938aa26c-c13d-5795-a1d2-dc9136cca045",
+      "from": "3c7937c7-2cd1-554e-af09-593f81146554",
+      "predicate": "hasCredential",
+      "to": "87371ae5-a516-5154-95a1-4153f20a6f81",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "fd54fdc8-df5b-5e6e-b844-f9d5e22c462d",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "7f5dee16-0028-5bc9-80c8-64799bea890f",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "8e499c06-5331-5bcf-94b8-d72c22c5dc55",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "27b511f3-fd30-5522-adf8-18e1d6fcd2ca",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "2e624bc7-c71d-54fa-b3f1-273c73c8c747",
+      "from": "27b511f3-fd30-5522-adf8-18e1d6fcd2ca",
+      "predicate": "appliesTo",
+      "to": "3c7937c7-2cd1-554e-af09-593f81146554",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "853d69ec-18ec-596b-8a5e-ef14e2406324",
+      "from": "7f5dee16-0028-5bc9-80c8-64799bea890f",
+      "predicate": "documents",
+      "to": "c17ec54b-5e2f-5665-8f0e-fc8839fa3343",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "37b1da78-9e19-5519-9bf1-aa92f3822140",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "owns",
+      "to": "5d56167d-7117-530a-9e92-bc2cf2854765",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "cc69aa29-8d4b-563e-8b82-e2d24d4b93dc",
+      "from": "008c0e4a-18f1-5b8a-834a-a8e64ff8416a",
+      "predicate": "implementedFrom",
+      "to": "5d56167d-7117-530a-9e92-bc2cf2854765",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "6bb114fb-9438-5f05-a0df-ae337ca5baaa",
+      "from": "c17ec54b-5e2f-5665-8f0e-fc8839fa3343",
+      "predicate": "implementedFrom",
+      "to": "5d56167d-7117-530a-9e92-bc2cf2854765",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "7a6f079d-1926-52be-a727-c9f0d1f31998",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "eb746103-c65e-5f89-889c-2124f0f492e1",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "5ae6c869-0ef2-5e08-b981-fbce4743eb4c",
+      "from": "eb746103-c65e-5f89-889c-2124f0f492e1",
+      "predicate": "providesAccessTo",
+      "to": "c9140bdf-de5b-5acd-9e05-78468d877e61",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    },
+    {
+      "id": "d565564d-41aa-5eb3-b3a4-95e4476cfece",
+      "from": "e09c0eb1-be1f-50bf-93dd-6d97bf3eaf1e",
+      "predicate": "knowsAbout",
+      "to": "a7c5f6e9-9d21-5765-a8a4-5fe8aa41212d",
+      "source": "synthetic test fixture",
+      "evidenceKind": "observed",
+      "certainty": "confirmed"
+    }
+  ],
+  "assertions": []
+}

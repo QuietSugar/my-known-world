@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/QuietSugar/my-known-world/devseed"
 	"github.com/QuietSugar/my-known-world/internal/api"
 	"github.com/QuietSugar/my-known-world/internal/bitwarden"
 	"github.com/QuietSugar/my-known-world/internal/cmdb"
@@ -25,7 +26,10 @@ import (
 )
 
 func main() {
-	g := demoGraph()
+	g, seedErr := devseed.Graph()
+	if seedErr != nil {
+		log.Fatalf("load development seed: %v", seedErr)
+	}
 	var syncPreviewer api.SyncPreviewer
 	var graphStore *pgstore.Store
 	dsn := os.Getenv("DATABASE_URL")
@@ -53,8 +57,10 @@ func main() {
 		}
 		g, err = store.LoadSnapshot(ctx)
 		if errors.Is(err, pgstore.ErrEmptySnapshot) && os.Getenv("MYKNOWNWORLD_SEED_DEMO") == "1" {
-			g = demoGraph()
-			err = store.SaveSnapshot(ctx, g)
+			g, err = devseed.Graph()
+			if err == nil {
+				err = store.SaveSnapshot(ctx, g)
+			}
 		}
 		if err != nil {
 			log.Fatalf("load graph snapshot: %v (set MYKNOWNWORLD_SEED_DEMO=1 only for an intentionally synthetic database)", err)
@@ -175,19 +181,5 @@ func main() {
 		if err := server.Shutdown(ctx); err != nil {
 			log.Printf("graceful shutdown: %v", err)
 		}
-	}
-}
-
-func demoGraph() *graph.Graph {
-	g := graph.New()
-	must(g.AddNode(graph.Node{ID: "self", Type: graph.Self, Name: "Self", Source: "synthetic demo", EvidenceKind: graph.EvidenceManual, Certainty: graph.CertaintyConfirmed, ModelVersion: 1}))
-	must(g.Publish(graph.Node{ID: "demo-machine", Type: graph.Machine, Name: "Example machine", Lifecycle: "active", Source: "synthetic demo", EvidenceKind: graph.EvidenceManual, Certainty: graph.CertaintyConfirmed, ModelVersion: 1}, graph.Relation{ID: "demo-maintains-machine", Predicate: graph.Maintains, To: "demo-machine", Source: "synthetic demo"}))
-	must(g.Publish(graph.Node{ID: "demo-project", Type: graph.SoftwareProject, Name: "Example project", Lifecycle: "maintained", Source: "synthetic demo", EvidenceKind: graph.EvidenceManual, Certainty: graph.CertaintyConfirmed, ModelVersion: 1}, graph.Relation{ID: "demo-knows-project", To: "demo-project", Source: "synthetic demo"}))
-	return g
-}
-
-func must(err error) {
-	if err != nil {
-		log.Fatal(err)
 	}
 }
