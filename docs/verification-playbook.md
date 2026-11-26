@@ -98,11 +98,14 @@ done < /tmp/refs.txt
 
 ## 五、hub 文档事实完整性
 
-`scripts/verify-migration.py` 以基线为准，列出从 hub 原文消失的事实：
+`scripts/verify-migration.py` 以基线为准，找出从 hub 原文消失的事实，并**逐条查库确认**：
 
 ```bash
-python3 scripts/verify-migration.py compare     # 应输出「校验通过」
+python3 scripts/verify-migration.py compare
 ```
+
+输出分两类：`已确认在库中可查` 与 `未能在库中确认`。后者返回非零，需要人工判断
+（可能确实丢失，也可能是不该入库的叙述性内容，如历史日期、内网地址）。
 
 结构发生较大变化、或按设计把路径替换为 UUID 后，重建基线前**必须先做交叉验证**：
 把 hub 中引用的 UUID 拿到库里解析，确认全部命中。基线变更原因记入
@@ -154,3 +157,53 @@ ssh svc "docker exec hall-pgsql pg_dump -U myknownworld -d myknownworld \
 # 验证可读
 ssh svc "docker exec -i hall-pgsql pg_restore --list" < <dump> | grep -c "TABLE DATA"
 ```
+
+## 八、待办：校验体系需要收敛（2026-11-26 记录）
+
+现状能用，但**不优雅**。分散在两个仓库、四个脚本，没有统一入口，也存在覆盖盲区。
+以下是待解决的问题，不是已完成的检查项。
+
+### 现状
+
+| 位置 | 资产 | 看 hub | 看库 |
+|---|---|---|---|
+| mkw `internal/**` | 60 个 Go 测试 | ✗ | ✗ |
+| hub `tooling/check-docs.py` | 链接与结构检查 | ✓ | ✗ |
+| mkw `scripts/parity-report.py` | frontmatter 逐值比对 | ✓ | ✓ |
+| mkw `scripts/verify-migration.py` | 消失事实查库 | ✓ | ✓ |
+| mkw `scripts/body-disposition.py` | 正文化文去向判定 | ✓ | ✗ |
+| mkw `scripts/find-missing-facts.py` | 正文 → frontmatter 缺口 | ✓ | ✗ |
+
+### 问题
+
+1. **没有统一入口**。验证一次完整一致性要跨两个仓库跑四条命令，顺序还有讲究
+   （先同步、再比对）。没有 CI 串联，靠人记得。
+
+2. **hub 侧完全不认识库**。`check-docs.py` 能验证链接指向的文件存在，但无法回答
+   「我引用的这个 UUID 在库里真的存在吗」。这类检查只能由 mkw 侧补。
+
+3. **只有单向覆盖**。四个 Python 脚本都是「以 hub 为起点去库里找」。
+   没有反向检查「库里每个节点是否被 hub 覆盖」——131 个节点里只有 58 个来自
+   hub-wiki，剩下 73 个（旧 CMDB 迁移）没有验证。
+
+4. **职责重叠**。`parity-report`（frontmatter）、`verify-migration`（原文事实）、
+   `find-missing-facts`（正文明细）三者都在回答「这条事实入库了吗」，
+   只是粒度不同，容易让人不知道该跑哪个。
+
+5. **口径不一**。`verify-migration` 和 `parity-report` 对「已入库」的判定方式不同：
+   前者做字符串包含，后者做逐值相等。同一个事实可能一个说通过、一个说不通过。
+
+### 建议方向（未实施）
+
+- 合并成一个入口 `scripts/check.py`，子命令 `parity` / `facts` / `body` / `links`，
+  或直接一条 `--all` 跑全套并按严重度汇总。
+- `check.py --all` 退出码作为唯一判据，接进 CI。
+- 补反向覆盖检查：库里存在但不来自 hub-wiki 的节点单独列出，标记来源与可信度。
+- 统一「已入库」判定为一个函数，三个脚本共用，消除口径差异。
+- hub 的 `check-docs.py` 保留纯 hub 自检职责，不做跨库检查——跨库归 mkw。
+
+### 在此之前
+
+按现有方式运行，命令见第一节至第七节。已知的 85 条「未确认」分类见
+`docs/migration-report.md`：其中 56 条是路径转 UUID 的合法结果，其余为历史日期、
+WireGuard 内网地址等本就不入库的事实。
