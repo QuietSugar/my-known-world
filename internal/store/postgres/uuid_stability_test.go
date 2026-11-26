@@ -150,25 +150,39 @@ func TestUUIDColumnIsGone(t *testing.T) {
 	}
 }
 
-// TestLoadedNodesCarryUUID ensures the read path surfaces the identity, otherwise
-// clients cannot use the stable identifier.
-func TestLoadedNodesCarryUUID(t *testing.T) {
+// TestSnapshotRoundTripKeepsFingerprint guards read/write symmetry.
+//
+// Undo inspects history by comparing each operation's recorded after-hash with
+// the fingerprint of the graph loaded back from the database. If loading adds
+// anything the in-memory graph did not have, the two never match and every
+// operation becomes un-undoable. That happened on 2026-11-26 when the read path
+// started filling in a uuid field the write path never set.
+func TestSnapshotRoundTripKeepsFingerprint(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	store := openTestStore(t)
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveSnapshot(ctx, seedUUIDGraph(t)); err != nil {
+	written := seedUUIDGraph(t)
+	if err := store.SaveSnapshot(ctx, written); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.LoadSnapshot(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range loaded.Nodes() {
-		if n.UUID == "" {
-			t.Errorf("node %q loaded without UUID", n.ID)
-		}
+	// SaveSnapshot truncates timestamps to the microsecond precision PostgreSQL
+	// stores, so the expected value is the canonicalized graph.
+	want, err := written.CanonicalizeTimes().Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := loaded.Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("fingerprint changed across save/load: wrote %s, read back %s", want, got)
 	}
 }

@@ -111,6 +111,11 @@ func (s *Store) Migrate(ctx context.Context) error {
 // SaveSnapshot atomically replaces all graph rows. Callers should use this only
 // for a complete authoritative snapshot, never for partial imports.
 func (s *Store) SaveSnapshot(ctx context.Context, g *graph.Graph) error {
+	// Truncate timestamps to microsecond precision, which is what PostgreSQL
+	// stores. Without this the fingerprint of the written graph (nanoseconds)
+	// never matches the one read back (microseconds), and undo history — which
+	// compares the two — becomes permanently unusable.
+	g = g.CanonicalizeTimes()
 	if err := validateSnapshot(g); err != nil {
 		return err
 	}
@@ -201,7 +206,7 @@ func (s *Store) LoadSnapshot(ctx context.Context) (*graph.Graph, error) {
 
 func loadSnapshotTx(ctx context.Context, tx *sql.Tx) (*graph.Graph, error) {
 	g := graph.New()
-	rows, err := tx.QueryContext(ctx, `SELECT n.id,n.id,n.type,n.name,n.lifecycle,n.last_confirmed,n.model_version,n.source,n.evidence_kind,n.certainty,n.candidate_type,n.review_status,n.review_questions,n.evidence_reference,rp.started_at,rp.ended_at,rp.deployed_version,rp.verification_at,rp.verification_result,rp.evidence_ref,hd.details,md.details,spd.details,sid.details,acd.details,pd.details,dd.details,rd.details,wid.details,nd.details FROM nodes n LEFT JOIN running_periods rp ON rp.node_id=n.id LEFT JOIN hardware_details hd ON hd.node_id=n.id LEFT JOIN machine_details md ON md.node_id=n.id LEFT JOIN software_project_details spd ON spd.node_id=n.id LEFT JOIN software_instance_details sid ON sid.node_id=n.id LEFT JOIN account_credential_details acd ON acd.node_id=n.id LEFT JOIN product_details pd ON pd.node_id=n.id LEFT JOIN document_details dd ON dd.node_id=n.id LEFT JOIN runbook_details rd ON rd.node_id=n.id LEFT JOIN work_item_details wid ON wid.node_id=n.id LEFT JOIN network_details nd ON nd.node_id=n.id ORDER BY n.id`)
+	rows, err := tx.QueryContext(ctx, `SELECT n.id,''::text,n.type,n.name,n.lifecycle,n.last_confirmed,n.model_version,n.source,n.evidence_kind,n.certainty,n.candidate_type,n.review_status,n.review_questions,n.evidence_reference,rp.started_at,rp.ended_at,rp.deployed_version,rp.verification_at,rp.verification_result,rp.evidence_ref,hd.details,md.details,spd.details,sid.details,acd.details,pd.details,dd.details,rd.details,wid.details,nd.details FROM nodes n LEFT JOIN running_periods rp ON rp.node_id=n.id LEFT JOIN hardware_details hd ON hd.node_id=n.id LEFT JOIN machine_details md ON md.node_id=n.id LEFT JOIN software_project_details spd ON spd.node_id=n.id LEFT JOIN software_instance_details sid ON sid.node_id=n.id LEFT JOIN account_credential_details acd ON acd.node_id=n.id LEFT JOIN product_details pd ON pd.node_id=n.id LEFT JOIN document_details dd ON dd.node_id=n.id LEFT JOIN runbook_details rd ON rd.node_id=n.id LEFT JOIN work_item_details wid ON wid.node_id=n.id LEFT JOIN network_details nd ON nd.node_id=n.id ORDER BY n.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1541,6 +1546,7 @@ func clearGraphRows(ctx context.Context, tx *sql.Tx) error {
 }
 
 func saveSnapshotTx(ctx context.Context, tx *sql.Tx, g *graph.Graph) error {
+	g = g.CanonicalizeTimes()
 	if err := clearGraphRows(ctx, tx); err != nil {
 		return err
 	}
