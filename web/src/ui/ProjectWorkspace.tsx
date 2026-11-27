@@ -25,7 +25,6 @@ import {
   type RunbookDetails,
   type DocumentDetails
 } from './api'
-import { xascPresetData } from './presets/xascPreset'
 import { getPresetSecret } from './presets/xascSecrets'
 import {
   Alert,
@@ -147,15 +146,22 @@ export function classifyEnvironments(
   return envs.filter(e => e.instances.length > 0 || e.machines.length > 0 || e.credentials.length > 0)
 }
 
-// 固定页面模式预置数据注册表
-const FIXED_PRESETS: Record<string, ProjectWorkspaceData> = {
-  'xasc': xascPresetData,
-  'projects/xasc': xascPresetData,
+// isUUID reports whether id is already a graph node id. Node ids became UUIDs
+// during the 2026-11 migration; prefixing them with projects/ produced a 404.
+function isUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 }
+
+// 固定页面模式已停用，注册表随之清空。若将来需要秒开的只读快照，
+// 应从当前图谱重新生成，而不是沿用迁移前的静态文件。
+const FIXED_PRESETS: Record<string, ProjectWorkspaceData> = {}
 
 // 模式总控：当前优先使用“固定页面模式”（秒开、稳定、零网络延迟等待）；
 // 待后续业务完全切为动态时，可无缝切回全动态拉取。
-export const PREFER_FIXED_PAGE = true
+// 关闭固定页面模式：presets/xascPreset.ts 是迁移前的静态快照（1962 行），
+// 其中的节点 id 还是 projects/xasc 这类路径，与库中的 UUID 已脱节，
+// 打开项目工作区会看到过期内容。数据已在库中，统一走 api.projectWorkspace。
+export const PREFER_FIXED_PAGE = false
 
 export function ProjectWorkspace({
   projectId,
@@ -354,7 +360,8 @@ export function ProjectWorkspace({
     const matched = projects.find(p => p.id === id || p.name === id || p.id === `projects/${id}`)
     if (matched) {
       resolvedId = matched.id
-    } else if (!resolvedId.startsWith('projects/')) {
+    } else if (!resolvedId.startsWith('projects/') && !isUUID(resolvedId)) {
+      // 旧约定用 projects/<slug> 寻址；图谱迁移后 ID 是 UUID，再拼前缀会 404。
       resolvedId = `projects/${resolvedId}`
     }
 
