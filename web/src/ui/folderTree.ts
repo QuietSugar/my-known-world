@@ -240,3 +240,129 @@ export function collectKeys(entries: BrowserEntry[]): string[] {
   entries.forEach(walk)
   return out
 }
+
+// Grouping describes one way of organising the same set of nodes.
+export interface Grouping {
+  id: string
+  label: string
+  hint: string
+}
+
+export const GROUPINGS: Grouping[] = [
+  { id: 'hosting', label: '按承载关系', hint: '硬件 → 机器 → 服务 → 凭据' },
+  { id: 'type', label: '按类型', hint: '按节点类型归类' },
+  { id: 'source', label: '按来源', hint: '按数据来路归类，便于看交付批次' },
+  { id: 'project', label: '按项目', hint: '按实现的软件项目归类' },
+  { id: 'lifecycle', label: '按状态', hint: '活跃 / 已退役 / 已销毁' },
+]
+
+// buildFlatGroups groups nodes by an arbitrary key function, producing a
+// two-level outline. It is the generic fallback for every grouping that is not
+// the hosting hierarchy.
+function buildFlatGroups(
+  nodes: Node[],
+  relations: Relation[],
+  keyOf: (n: Node) => string | undefined,
+  labelFor: (key: string) => string,
+  emptyLabel: string,
+): BrowserEntry[] {
+  const byId = new Map(nodes.map(n => [n.id, n]))
+  const groups = new Map<string, Node[]>()
+  for (const n of nodes) {
+    const key = keyOf(n) ?? emptyLabel
+    const list = groups.get(key)
+    if (list) list.push(n)
+    else groups.set(key, [n])
+  }
+  const entries: BrowserEntry[] = []
+  for (const [key, items] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh'))) {
+    entries.push({
+      kind: 'group',
+      key: `group:${key}`,
+      label: labelFor(key),
+      detail: `${items.length} 项`,
+      count: items.length,
+      children: items
+        .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b), 'zh'))
+        .map(n => ({
+          kind: 'node' as const,
+          key: n.id,
+          label: nodeLabel(n),
+          detail: nodeDetail(n, undefined, byId),
+          node: n,
+        })),
+      // relations 参数保留：未来可在此基础上按关系再分层
+      ...(relations.length < 0 ? {} : {}),
+    })
+  }
+  return entries
+}
+
+// buildGrouping returns the outline for the requested grouping id.
+export function buildGrouping(
+  grouping: string,
+  nodes: Node[],
+  relations: Relation[],
+): BrowserEntry[] {
+  switch (grouping) {
+    case 'type':
+      return buildFlatGroups(nodes.filter(n => n.type !== 'Self'), relations, n => n.type, k => k, '未分类')
+    case 'source':
+      return buildFlatGroups(nodes.filter(n => n.type !== 'Self'), relations, n => n.source || undefined, k => k, '未标注来源')
+    case 'lifecycle':
+      return buildFlatGroups(nodes.filter(n => n.type !== 'Self'), relations, n => n.lifecycle || 'active', k => k, '未标注状态')
+    case 'project': {
+      // 项目视图把「某个软件项目实现了哪些服务」摆在同一层，便于交付核对。
+      const byId = new Map(nodes.map(n => [n.id, n]))
+      const impl = new Map<string, Node[]>()
+      for (const r of relations) {
+        if (r.predicate !== 'implementedFrom') continue
+        const from = byId.get(r.from)
+        if (!from) continue
+        const list = impl.get(r.to)
+        if (list) list.push(from)
+        else impl.set(r.to, [from])
+      }
+      const projects = nodes.filter(n => n.type === 'SoftwareProject')
+      const entries: BrowserEntry[] = projects
+        .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b), 'zh'))
+        .map(p => {
+          const kids = (impl.get(p.id) ?? []).sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b), 'zh'))
+          return {
+            kind: 'node' as const,
+            key: p.id,
+            label: nodeLabel(p),
+            detail: kids.length > 0 ? `${kids.length} 个实现` : '暂无实现',
+            node: p,
+            count: kids.length,
+            children: kids.map(n => ({
+              kind: 'node' as const,
+              key: n.id,
+              label: nodeLabel(n),
+              detail: nodeDetail(n, undefined, byId),
+              node: n,
+            })),
+          }
+        })
+      // 没有归属项目的东西单独列出，避免看着像丢了
+      const claimed = new Set(projects.map(p => p.id))
+      for (const kids of impl.values()) for (const k of kids) claimed.add(k.id)
+      const rest = nodes.filter(n => n.type !== 'Self' && n.type !== 'SoftwareProject' && !claimed.has(n.id))
+      if (rest.length > 0) {
+        entries.push({
+          kind: 'group',
+          key: 'group:unassigned',
+          label: '未归属项目',
+          detail: `${rest.length} 项`,
+          count: rest.length,
+          children: rest
+            .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b), 'zh'))
+            .map(n => ({ kind: 'node' as const, key: n.id, label: nodeLabel(n), detail: nodeDetail(n, undefined, byId), node: n })),
+        })
+      }
+      return entries
+    }
+    default:
+      return buildInfrastructureTree(nodes, relations)
+  }
+}

@@ -828,7 +828,7 @@ export function App() {
                   <SyncBatchPanel onApplied={refresh} />
                 </>
               )}
-              {view === 'browse' && <FolderBrowser nodes={nodes} relations={relations} onOpen={focus} />}
+              {view === 'browse' && <FolderBrowser nodes={nodes} relations={relations} selectedId={selected?.id} onOpen={focus} />}
               {view === 'explore' && <GraphExplorer nodes={nodes} onSelect={focus} />}
               {view === 'workspace' && (
                 <ProjectWorkspace
@@ -839,7 +839,7 @@ export function App() {
                   onOpenDetailsEditor={node => setDetailsEditorNode(node)}
                 />
               )}
-              {view !== 'overview' && view !== 'sources' && view !== 'sync' && view !== 'explore' && view !== 'workspace' && (
+              {view !== 'overview' && view !== 'browse' && view !== 'sources' && view !== 'sync' && view !== 'explore' && view !== 'workspace' && (
                 <section className="panel objects-panel listing-panel">
                   <div className="list-toolbar">
                     <div>
@@ -1050,7 +1050,12 @@ export function App() {
             )}
 
             {entityHistory.length > 0 && (
-              <Card size="small" title={`对象变更历史 (${entityHistory.length} 条)`} style={{ marginBottom: 16 }}>
+              <Card size="small" style={{ marginBottom: 16 }}>
+                <details className="history-disclosure">
+                  <summary>
+                    <span>对象变更历史</span>
+                    <span className="history-count">{entityHistory.length} 条</span>
+                  </summary>
                 <Timeline
                   style={{ marginTop: 12 }}
                   items={entityHistory.map(event => ({
@@ -1063,6 +1068,7 @@ export function App() {
                     )
                   }))}
                 />
+                </details>
               </Card>
             )}
 
